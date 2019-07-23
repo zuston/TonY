@@ -8,6 +8,9 @@ buildscript {
   repositories {
     jcenter()
     maven {
+      url "http://jfrog.cloud.qiyi.domain/libs-release/"
+    }
+    maven {
       url "https://plugins.gradle.org/m2/"
     }
   }
@@ -127,6 +130,9 @@ subprojects {
   }
 
   repositories {
+    maven {
+      url "http://jfrog.cloud.qiyi.domain/libs-release/"
+    }
     mavenCentral()
   }
   plugins.withType(JavaPlugin) {
