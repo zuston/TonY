@@ -106,7 +106,7 @@ public class Constants {
   public static final String TEST_TASK_EXECUTOR_SKEW = "TEST_TASK_EXECUTOR_SKEW";
 
   // Used to get all Hadoop jar paths. Reference: https://www.tensorflow.org/deploy/hadoop
-  public static final String HADOOP_CLASSPATH_COMMAND = "CLASSPATH=$(${HADOOP_HDFS_HOME}/bin/hadoop classpath --glob) ";
+  public static final String HADOOP_CLASSPATH_COMMAND = "CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob) ";
   public static final String SKIP_HADOOP_PATH = "SKIP_HADOOP_PATH";
 
   public static final String TONY_FOLDER = ".tony";

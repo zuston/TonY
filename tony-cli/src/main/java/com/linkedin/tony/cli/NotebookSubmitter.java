@@ -40,7 +40,7 @@ import static com.linkedin.tony.Constants.TONY_FOLDER;
  * Usage:
  * // Suppose you have a folder named bin/ at root directory which contains a notebook pex file: linotebook, you can use
  * // this command to start the notebook and follow the output message to visit the jupyter notebook page.
- * CLASSPATH=$(${HADOOP_HDFS_HOME}/bin/hadoop classpath --glob):./:/home/khu/notebook/tony-cli-0.1.0-all.jar \
+ * CLASSPATH=$(${HADOOP_HOME}/bin/hadoop classpath --glob):./:/home/khu/notebook/tony-cli-0.1.0-all.jar \
  * java com.linkedin.tony.cli.NotebookSubmitter --src_dir bin/ --executes "'bin/linotebook --ip=* $DISABLE_TOKEN'"
  */
 public class NotebookSubmitter extends TonySubmitter {
