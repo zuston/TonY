@@ -22,6 +22,7 @@ import com.linkedin.tony.rpc.TaskInfo;
 import com.linkedin.tony.rpc.impl.MetricsRpcServer;
 import com.linkedin.tony.rpc.impl.TaskStatus;
 import com.linkedin.tony.tensorflow.TensorFlowContainerRequest;
+import com.linkedin.tony.tensorflow.TensorFlowRedirectServer;
 import com.linkedin.tony.tensorflow.TonySession;
 import com.linkedin.tony.tensorflow.TonySession.TonyTask;
 import com.linkedin.tony.util.Utils;
@@ -117,6 +118,7 @@ public class ApplicationMaster {
   private Map<String, LocalResource> localResources = new ConcurrentHashMap<>();
   private Configuration tonyConf = new Configuration(false);
   private ContainerId containerId;
+  private TensorFlowRedirectServer redirectServer;
 
   /** The environment set up for the TaskExecutor **/
   private Map<String, String> containerEnv = new ConcurrentHashMap<>();
@@ -404,7 +406,8 @@ public class ApplicationMaster {
     String amHostPort;
     try {
       hostNameOrIpFromTokenConf = Utils.getHostNameOrIpFromTokenConf(yarnConf);
-      response = amRMClient.registerApplicationMaster(amHostname, amPort, null);
+      String amTrackingUrl = startTensorFlowRedirectServer(amHostname, amPort);
+      response = amRMClient.registerApplicationMaster(amHostname, amPort, amTrackingUrl);
       amHostPort = hostNameOrIpFromTokenConf + ":" + amPort;
     } catch (YarnException | SocketException e) {
       LOG.error("Exception while preparing AM", e);
@@ -454,6 +457,22 @@ public class ApplicationMaster {
     hbMonitor.start();
 
     return true;
+  }
+
+  private String startTensorFlowRedirectServer(String hostname, int port) {
+    String url = null;
+    redirectServer = new TensorFlowRedirectServer();
+    try {
+      redirectServer.init(hostname, port);
+      String amLogUrl = Utils.constructContainerUrl(hostname + ":"
+          + System.getenv(ApplicationConstants.Environment.NM_HTTP_PORT.name()), containerId);
+      redirectServer.setAmLogUrl(amLogUrl);
+      redirectServer.run();
+      url = hostname + ":" + redirectServer.getPort();
+    } catch (Exception e) {
+      LOG.warn("Failed to start TensorFlow redirect server", e);
+    }
+    return url;
   }
 
   /**
@@ -660,6 +679,7 @@ public class ApplicationMaster {
       LOG.error("Failed to unregister application", e);
     }
 
+    redirectServer.stop();
     nmClientAsync.stop();
     amRMClient.stop();
     // Poll until TonyClient signals we should exit
@@ -897,14 +917,11 @@ public class ApplicationMaster {
   private String registerTensorBoardUrlToRM(String spec) throws Exception {
     if (spec != null && appIdString != null) {
       try {
-        // Post YARN-7974 or Hadoop 3.1.2 release
-        // amRMClient.updateTrackingUrl(spec);
-        @SuppressWarnings("JavaReflectionMemberAccess")
-        Method method = AMRMClientAsync.class.getMethod("updateTrackingUrl", String.class);
-        method.invoke(amRMClient, spec);
-      } catch (NoSuchMethodException nsme) {
-        LOG.warn("This Hadoop version doesn't have the YARN-7974 patch, TonY won't register TensorBoard URL with"
-                 + "application's tracking URL");
+        redirectServer.setTensorBoardUrl(spec);
+        LOG.info("TensorBoard URL: " + spec);
+      } catch (Exception e) {
+        LOG.warn("Failed to set TensorBoard URL to redirect server", e);
+        return "FAILED";
       }
       return "SUCCEEDED";
     } else {
