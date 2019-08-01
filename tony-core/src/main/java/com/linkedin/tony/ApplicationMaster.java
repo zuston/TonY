@@ -917,7 +917,7 @@ public class ApplicationMaster {
   private String registerTensorBoardUrlToRM(String spec) throws Exception {
     if (spec != null && appIdString != null) {
       try {
-        redirectServer.setTensorBoardUrl(spec);
+        redirectServer.setTensorBoardUrl("http://" + spec);
         LOG.info("TensorBoard URL: " + spec);
       } catch (Exception e) {
         LOG.warn("Failed to set TensorBoard URL to redirect server", e);

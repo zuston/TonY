@@ -111,23 +111,41 @@ public class TensorFlowRedirectServer {
         public void run() {
           try {
             if (exchange.getRequestMethod().equals("GET")) {
-              String response = String.format(
-                  "<!DOCTYPE html>%n" + "<html>%n" + "<head>%n" + "<title>TensorFlow Redirect Page</title>"
-                      + "</head>%n" + "<body>%n <h1>TensorFlow Redirect Page</h1>"
-                      + "<p>TensorBoard: <a href=http://%s>http://%s</a></p>"
-                      + "<p>ApplicationMaster log: <a href=http://%s>http://%s</a></p>" + "</body>%n" + "</html>",
-                  tensorBoardUrl, tensorBoardUrl, amLogUrl, amLogUrl);
+              StringBuilder sb = new StringBuilder();
+              sb.append("<!DOCTYPE html><html>");
+              sb.append("<head><title>TensorFlow Redirect Page</title></head>");
+              sb.append("<body>");
+              sb.append("<h1>TensorFlow Redirect Page</h1>");
+              sb.append("<p>TensorBoard: ");
+              if (tensorBoardUrl == null) {
+                sb.append("(not started yet)");
+              } else {
+                sb.append("<a href=\"");
+                sb.append(tensorBoardUrl);
+                sb.append("\">");
+                sb.append(tensorBoardUrl);
+                sb.append("</a>");
+              }
+              sb.append("</p>");
+              sb.append("<p>ApplicationMaster log: <a href=\"");
+              sb.append(amLogUrl);
+              sb.append("\">");
+              sb.append(amLogUrl);
+              sb.append("</a></p>");
+              sb.append("</body>");
+              sb.append("</html>");
+              String html = sb.toString();
               Headers headers = exchange.getResponseHeaders();
               headers.set("Content-Type", "text/html; charset=UTF-8");
-              exchange.sendResponseHeaders(200, response.length());
+              exchange.sendResponseHeaders(200, html.length());
               OutputStream os = exchange.getResponseBody();
-              os.write(response.getBytes("utf-8"));
+              os.write(html.getBytes("utf-8"));
               os.close();
             } else {
               exchange.sendResponseHeaders(404, 0);
             }
           } catch (IOException e) {
-            LOG.warn("Fail to redirect!");
+            LOG.error("Fail to redirect!", e);
           }
         }
 
