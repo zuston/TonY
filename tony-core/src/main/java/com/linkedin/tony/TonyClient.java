@@ -4,20 +4,7 @@
  */
 package com.linkedin.tony;
 
-import azkaban.jobtype.HadoopConfigurationInjector;
-import azkaban.utils.Props;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableList;
-import com.google.common.io.Files;
-import com.linkedin.tony.client.CallbackHandler;
-import com.linkedin.tony.client.TaskUpdateListener;
-import com.linkedin.tony.rpc.TaskInfo;
-import com.linkedin.tony.rpc.impl.ApplicationRpcClient;
-import com.linkedin.tony.security.TokenCache;
-import com.linkedin.tony.tensorflow.TensorFlowContainerRequest;
-import com.linkedin.tony.util.HdfsUtils;
-import com.linkedin.tony.util.Utils;
-import com.linkedin.tony.util.VersionInfo;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -84,12 +71,30 @@ import org.apache.hadoop.yarn.security.client.ClientToAMTokenIdentifier;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.Records;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
+import com.google.common.io.Files;
+import com.linkedin.tony.client.CallbackHandler;
+import com.linkedin.tony.client.TaskUpdateListener;
+import com.linkedin.tony.rpc.TaskInfo;
+import com.linkedin.tony.rpc.impl.ApplicationRpcClient;
+import com.linkedin.tony.security.TokenCache;
+import com.linkedin.tony.tensorflow.TensorFlowContainerRequest;
+import com.linkedin.tony.util.HdfsUtils;
+import com.linkedin.tony.util.Utils;
+import com.linkedin.tony.util.VersionInfo;
+
+import azkaban.jobtype.HadoopConfigurationInjector;
+import azkaban.utils.Props;
+
 
 /**
  * User entry point to submit tensorflow job.
  */
 public class TonyClient implements AutoCloseable {
   private static final Log LOG = LogFactory.getLog(TonyClient.class);
+  private String tonyUserConfStr;
+  private String tensorboardProxyUrl;
 
   // Configurations
   private YarnClient yarnClient;
@@ -174,9 +179,6 @@ public class TonyClient implements AutoCloseable {
     FileSystem fs = FileSystem.get(hdfsConf);
     ApplicationSubmissionContext appContext = app.getApplicationSubmissionContext();
     appId = appContext.getApplicationId();
-    if (callbackHandler != null) {
-      callbackHandler.onApplicationIdReceived(appId);
-    }
     appResourcesPath = new Path(fs.getHomeDirectory(), Constants.TONY_FOLDER + Path.SEPARATOR + appId.toString());
 
     this.tonyFinalConfPath = processFinalTonyConf();
@@ -259,9 +261,12 @@ public class TonyClient implements AutoCloseable {
     yarnClient.submitApplication(appContext);
     ApplicationReport report = yarnClient.getApplicationReport(appId);
     logTrackingAndRMUrls(report);
+    if (callbackHandler != null) {
+        callbackHandler.onApplicationIdReceived(appContext);
+    }
   }
 
-  /**
+    /**
    * Uploads a configuration (e.g.: YARN or HDFS configuration) to HDFS and adds the configuration to the
    * container resources in the TonY conf.
    * @param conf  Configuration to upload and add.
@@ -289,8 +294,8 @@ public class TonyClient implements AutoCloseable {
   private void logTrackingAndRMUrls(ApplicationReport report) {
     LOG.info("URL to track running application (will proxy to TensorBoard once it has started): "
              + report.getTrackingUrl());
-    LOG.info("ResourceManager web address for application: "
-        + Utils.buildRMUrl(yarnConf, report.getApplicationId().toString()));
+    tensorboardProxyUrl = report.getTrackingUrl();
+    LOG.info("ResourceManager web address for application: " + Utils.buildRMUrl(yarnConf, report.getApplicationId().toString()));
   }
 
   private void initHdfsConf() {
@@ -480,18 +485,23 @@ public class TonyClient implements AutoCloseable {
    */
   public void initTonyConf(Configuration tonyConf, CommandLine cliParser) throws IOException {
     tonyConf.addResource(Constants.TONY_DEFAULT_XML);
+
+    Configuration tonyUserConf = new Configuration(false);
     if (cliParser.hasOption("conf_file")) {
       Path confFilePath = new Path(cliParser.getOptionValue("conf_file"));
 
       // if no scheme, assume local file, else read using corresponding filesystem
       if (confFilePath.toUri().getScheme() == null) {
         tonyConf.addResource(confFilePath);
+        tonyUserConf.addResource(confFilePath);
       } else {
         tonyConf.addResource(confFilePath.getFileSystem(hdfsConf).open(confFilePath));
+        tonyUserConf.addResource(confFilePath.getFileSystem(hdfsConf).open(confFilePath));
       }
     } else {
       // Search for tony.xml on classpath. Will NOT throw an error if not present on classpath.
       tonyConf.addResource(Constants.TONY_XML);
+      tonyUserConf.addResource(Constants.TONY_XML);
     }
     if (cliParser.hasOption("conf")) {
       String[] confs = cliParser.getOptionValues("conf");
@@ -512,6 +522,10 @@ public class TonyClient implements AutoCloseable {
       tonyConfDir = Constants.DEFAULT_TONY_CONF_DIR;
     }
     tonyConf.addResource(new Path(tonyConfDir + File.separatorChar + Constants.TONY_SITE_CONF));
+
+    ByteArrayOutputStream tempOs = new ByteArrayOutputStream();
+    tonyUserConf.writeXml(tempOs);
+    tonyUserConfStr = tempOs.toString("UTF-8");
   }
 
   /**
@@ -899,6 +913,7 @@ public class TonyClient implements AutoCloseable {
           listener.onTaskInfosUpdated(receivedInfos);
         }
         taskInfos = receivedInfos;
+        callbackHandler.afterApplicationSubmitted(appId, taskInfoDiff);
       }
 
       // Query AM for taskInfos if taskInfos is empty.
@@ -1087,4 +1102,15 @@ public class TonyClient implements AutoCloseable {
     System.exit(exitCode);
   }
 
+    public String getTonyUserConfStr() {
+        return tonyUserConfStr;
+    }
+
+    public String getTensorboardProxyUrl() {
+        return tensorboardProxyUrl;
+    }
+
+    public ApplicationId getAppId() {
+        return appId;
+    }
 }

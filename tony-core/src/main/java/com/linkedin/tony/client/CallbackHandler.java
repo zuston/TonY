@@ -4,7 +4,12 @@
  */
 package com.linkedin.tony.client;
 
+import java.util.Set;
+
 import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
+
+import com.linkedin.tony.rpc.TaskInfo;
 
 /**
  * CallbackHandler is used to get callbacks from TonyClient when some
@@ -12,5 +17,7 @@ import org.apache.hadoop.yarn.api.records.ApplicationId;
  */
 public interface CallbackHandler {
     // Called when TonyClient gets an application id response from RM.
-    public void onApplicationIdReceived(ApplicationId appId);
+    public void onApplicationIdReceived(final ApplicationSubmissionContext appContext);
+
+    public void afterApplicationSubmitted(final ApplicationId appId, final Set<TaskInfo> taskInfoSet);
 }

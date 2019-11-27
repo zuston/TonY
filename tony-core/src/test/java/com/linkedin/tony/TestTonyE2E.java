@@ -18,6 +18,7 @@ import org.apache.hadoop.fs.CommonConfigurationKeys;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.testng.Assert;
 import org.testng.annotations.AfterClass;
@@ -55,10 +56,10 @@ public class TestTonyE2E  {
 
   private static class TestTonyE2EHandler implements CallbackHandler, TaskUpdateListener {
 
-    private ApplicationId appId;
+    private ApplicationSubmissionContext appSubmissionContext;
 
     public ApplicationId getAppId() {
-      return appId;
+      return appSubmissionContext.getApplicationId();
     }
 
     public Set<TaskInfo> getTaskInfoSet() {
@@ -68,8 +69,13 @@ public class TestTonyE2E  {
     private Set<TaskInfo> taskInfoSet;
 
     @Override
-    public void onApplicationIdReceived(ApplicationId appId) {
-      this.appId = appId;
+    public void onApplicationIdReceived(ApplicationSubmissionContext appSubmissionContext) {
+      this.appSubmissionContext = appSubmissionContext;
+    }
+
+    @Override
+    public void afterApplicationSubmitted(ApplicationId appId, Set<TaskInfo> taskInfoSet) {
+
     }
 
     @Override
@@ -376,7 +382,7 @@ public class TestTonyE2E  {
     Set<String> actualJobs = new HashSet<>();
     expectedJobs.add(Constants.WORKER_JOB_NAME);
     expectedJobs.add(Constants.PS_JOB_NAME);
-    Assert.assertNotNull(handler.appId);
+    Assert.assertNotNull(handler.getAppId());
     Assert.assertEquals(exitCode, 0);
     client.removeListener(handler);
     Assert.assertEquals(handler.getTaskInfoSet().size(), 2);
