@@ -5,6 +5,14 @@
 
 package com.linkedin.tony.cli;
 
+import com.google.gson.Gson;
+import com.linkedin.tony.Constants;
+import com.linkedin.tony.TonyClient;
+import com.linkedin.tony.TonyConfigurationKeys;
+import com.linkedin.tony.client.CallbackHandler;
+import com.linkedin.tony.rpc.TaskInfo;
+import com.linkedin.tony.util.Utils;
+
 import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -16,6 +24,7 @@ import org.apache.commons.cli.ParseException;
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.httpclient.methods.PostMethod;
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -26,13 +35,6 @@ import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
 import org.apache.hadoop.yarn.api.records.LocalResourceType;
 import org.apache.hadoop.yarn.exceptions.YarnException;
-
-import com.google.gson.Gson;
-import com.linkedin.tony.TonyClient;
-import com.linkedin.tony.TonyConfigurationKeys;
-import com.linkedin.tony.client.CallbackHandler;
-import com.linkedin.tony.rpc.TaskInfo;
-import com.linkedin.tony.util.Utils;
 
 import static com.linkedin.tony.Constants.CORE_SITE_CONF;
 import static com.linkedin.tony.Constants.HADOOP_CONF_DIR;
@@ -274,10 +276,19 @@ public class ClusterSubmitter extends TonySubmitter {
 
     public static void main(String[] args) throws ParseException, URISyntaxException {
     int exitCode;
-    try (TonyClient tonyClient = new TonyClient(new AppRegisterHandler(), new Configuration())) {
+    Configuration configuration = new Configuration();
+    setGearToConf(configuration);
+    try (TonyClient tonyClient = new TonyClient(new AppRegisterHandler(), configuration)) {
       ClusterSubmitter submitter = new ClusterSubmitter(tonyClient);
       exitCode = submitter.submit(args);
     }
     System.exit(exitCode);
+  }
+
+  private static void setGearToConf(Configuration configuration) {
+    String gearWorkflowId = System.getenv("GEAR_WORKFLOW_ACTION_ID");
+    if (StringUtils.isNotEmpty(gearWorkflowId)) {
+      configuration.set(Constants.GEAR_WORKFLOW_ID_KEY, gearWorkflowId);
+    }
   }
 }

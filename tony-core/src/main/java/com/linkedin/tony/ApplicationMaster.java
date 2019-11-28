@@ -7,14 +7,14 @@ package com.linkedin.tony;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.linkedin.tony.events.TaskFinished;
-import com.linkedin.tony.events.TaskStarted;
-import com.linkedin.tony.models.JobMetadata;
 import com.linkedin.tony.events.ApplicationFinished;
 import com.linkedin.tony.events.ApplicationInited;
 import com.linkedin.tony.events.Event;
 import com.linkedin.tony.events.EventHandler;
 import com.linkedin.tony.events.EventType;
+import com.linkedin.tony.events.TaskFinished;
+import com.linkedin.tony.events.TaskStarted;
+import com.linkedin.tony.models.JobMetadata;
 import com.linkedin.tony.rpc.ApplicationRpc;
 import com.linkedin.tony.rpc.ApplicationRpcServer;
 import com.linkedin.tony.rpc.MetricsRpc;
@@ -26,6 +26,7 @@ import com.linkedin.tony.tensorflow.TensorFlowRedirectServer;
 import com.linkedin.tony.tensorflow.TonySession;
 import com.linkedin.tony.tensorflow.TonySession.TonyTask;
 import com.linkedin.tony.util.Utils;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -48,10 +49,12 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.stream.Collectors;
+
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -385,6 +388,7 @@ public class ApplicationMaster {
     applicationRpcServer = setupRPCService(amHostname);
     containerEnv.put(Constants.AM_HOST, amHostname);
     containerEnv.put(Constants.AM_PORT, Integer.toString(amPort));
+    setOpalEnv(containerEnv);
 
     // Setup metrics RPC server.
     ServerSocket rpcSocket = new ServerSocket(0);
@@ -737,6 +741,7 @@ public class ApplicationMaster {
      * set it to user.dir (root of this container's address).
      */
     extraEnv.put("HOME", System.getProperty("user.dir"));
+    setOpalEnv(extraEnv);
     String taskCommand = tonyConf.get(TonyConfigurationKeys.getExecuteCommandKey(Constants.AM_NAME),
                 tonyConf.get(TonyConfigurationKeys.getContainerExecuteCommandKey()));
     LOG.info("Executing command: " + taskCommand);
@@ -1183,8 +1188,22 @@ public class ApplicationMaster {
 
   }
 
-  //region testing
+  private void setOpalEnv(Map<String, String> env) {
+    env.put(Constants.APPLICATION_ID_STRING, appIdString);
+    env.put(Constants.TONY_SUBMIT_TYPE, tonyConf.get(Constants.TONY_SUBMIT_TYPE_TAG, "cluster"));
+    String opalUrl = Constants.OPAL_URL_PROD;
+    if (tonyConf.getBoolean(Constants.TONY_OPAL_TEST, false)) {
+      opalUrl = Constants.OPAL_URL_TEST;
+    }
+    env.put(Constants.OPAL_URL, opalUrl);
 
+    String gearWorkflowId = tonyConf.get(Constants.GEAR_WORKFLOW_ID_KEY);
+    if (StringUtils.isNotEmpty(gearWorkflowId)) {
+      env.put(Constants.GEAR_WORKFLOW_ID_KEY, gearWorkflowId);
+    }
+  }
+
+  //region testing
   private void killChiefWorkerIfTesting(String taskId) {
     // Simulation of chief worker been killed.
     if (System.getenv(Constants.TEST_WORKER_TERMINATED) != null && taskId.equals(Constants.COORDINATOR_ID)) {
