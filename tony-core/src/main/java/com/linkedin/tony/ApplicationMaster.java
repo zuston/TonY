@@ -786,6 +786,8 @@ public class ApplicationMaster {
   private final class RpcForClient implements ApplicationRpc {
     private static final long REGISTRATION_STATUS_INTERVAL_MS = 15 * 1000;
 
+    private static final long REGISTRATION_TIMEOUT_MS = 300 * 1000;
+
     private Set<String> registeredTasks = new HashSet<>();
     private long lastRegisterWorkerTime = System.currentTimeMillis();
 
@@ -859,12 +861,24 @@ public class ApplicationMaster {
           Set<TonyTask> unregisteredTasks = getUnregisteredTasks();
           LOG.info(String.format("Received registrations from %d tasks, awaiting registration from %d tasks.",
               registeredTasks.size(), totalTasks - registeredTasks.size()));
-          unregisteredTasks.forEach(t -> LOG.info(
-                  String.format("Awaiting registration from task %s %s in %s on host %s",
-                      t.getJobName(), t.getTaskIndex(),
-                      (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
-                      (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none")))
-          );
+          unregisteredTasks.forEach(t -> {
+            // Stop application when timeout
+            if (System.currentTimeMillis() - t.getStartTime() > REGISTRATION_TIMEOUT_MS) {
+              String errorMsg = String.format("Stopping AM for task [%s:%s] registration timeout: " +
+                      "allocated container is %s on host %s",
+                  t.getJobName(), t.getTaskIndex(),
+                  (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
+                  (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none"));
+              LOG.error(errorMsg);
+              session.setFinalStatus(FinalApplicationStatus.FAILED, errorMsg);
+              stop();
+            } else {
+                LOG.info(String.format("Awaiting registration from task %s %s in %s on host %s",
+                    t.getJobName(), t.getTaskIndex(),
+                    (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
+                    (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none")));
+            }
+          });
           lastRegisterWorkerTime = System.currentTimeMillis();
         }
         return null;
