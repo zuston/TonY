@@ -224,6 +224,11 @@ public class TonyConfigurationKeys {
   public static final String WORKER_TIMEOUT = WORKER_PREFIX + "timeout";
   public static final int DEFAULT_WORKER_TIMEOUT = 0;
 
+  // Evaluator configurations
+  public static final String EVALUATOR_PREFIX = TONY_PREFIX + "evaluator.";
+  public static final String EVALUATOR_RUN_ALONE_TIMEOUT = EVALUATOR_PREFIX + "run-alone.timeout";
+  public static final int DEFAULT_EVALUATOR_RUN_ALONE_TIMEOUT = 0;
+
   // Job types that we don't wait to finish
   public static final String UNTRACKED_JOBTYPES = TONY_APPLICATION_PREFIX + "untracked.jobtypes";
   public static final String UNTRACKED_JOBTYPES_DEFAULT = "ps";

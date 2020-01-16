@@ -171,6 +171,13 @@
     <value>0</value>
   </property>
 
+  <!-- Evaluator configurations -->
+  <property>
+    <description>Timeout configuration for evaluator job task has been running alone</description>
+    <name>tony.evaluator.run-alone.timeout</name>
+    <value>0</value>
+  </property>
+
   <!-- Untracked job type configurations -->
   <property>
     <description>Job types that we don't track to finish</description>

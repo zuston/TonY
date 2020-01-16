@@ -594,6 +594,10 @@ public class ApplicationMaster {
     containerEnv.put(Constants.ATTEMPT_NUMBER, String.valueOf(attempt));
     long expireTime = appTimeout == 0 ? Long.MAX_VALUE : System.currentTimeMillis() + appTimeout;
     int counter = 0;
+    boolean evaluatorAlone = false;
+    long evaluatorAloneStartTime = 0;
+    long evaluatorAloneTimeout = tonyConf.getInt(TonyConfigurationKeys.EVALUATOR_RUN_ALONE_TIMEOUT,
+        TonyConfigurationKeys.DEFAULT_EVALUATOR_RUN_ALONE_TIMEOUT);
     while (true) {
       counter += 1;
       // Checking timeout
@@ -634,6 +638,24 @@ public class ApplicationMaster {
         if (numCompletedTrackedTasks == numTotalTrackedTasks) {
           Utils.printCompletedTrackedTasks(numCompletedTrackedTasks, numTotalTrackedTasks);
           break;
+        } else if (evaluatorAloneTimeout > 0) {
+          // Check if the evaluator is the only task
+          int notCompletedEvaluatorTasks = session.getNotCompletedTrackedTasks("evaluator");
+          if (!evaluatorAlone && notCompletedEvaluatorTasks > 0
+              && notCompletedEvaluatorTasks == session.getNotCompletedTrackedTasks()) {
+            LOG.info(String.format("All other job tasks finished, and only evaluators are left alone, " +
+               "number of left evaluators: %d", notCompletedEvaluatorTasks));
+            evaluatorAlone = true;
+            evaluatorAloneStartTime = System.currentTimeMillis();
+          }
+          if (evaluatorAlone && System.currentTimeMillis() - evaluatorAloneStartTime >= evaluatorAloneTimeout) {
+            String msg = String.format("All other job tasks finished, " +
+                    "and evaluators have been running timeout for %d ms",
+                System.currentTimeMillis() - evaluatorAloneStartTime);
+            LOG.info(msg);
+            session.setFinalStatus(FinalApplicationStatus.FAILED, msg);
+            break;
+          }
         }
 
         // Reduce logging frequency to every 100s.
