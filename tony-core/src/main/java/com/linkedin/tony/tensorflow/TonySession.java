@@ -202,7 +202,7 @@ public class TonySession {
       TonyTask[] tasks = jobTasks.get(jobName);
       for (int i = 0; i < tasks.length; i++) {
         if (tasks[i] == null) {
-          tasks[i] = new TonyTask(jobName, String.valueOf(i), sessionId, System.currentTimeMillis());
+          tasks[i] = new TonyTask(jobName, String.valueOf(i), sessionId);
           return tasks[i];
         }
       }
@@ -377,7 +377,6 @@ public class TonySession {
     private String host;
     private int port = -1;
     private TaskInfo taskInfo;
-    private final long startTime;
 
     /**
      * The container the task is running in. Set once a container has been allocated for the task.
@@ -405,10 +404,6 @@ public class TonySession {
 
     public String getHost() {
       return host;
-    }
-
-    public long getStartTime() {
-      return startTime;
     }
 
     public Container getContainer() {
@@ -470,11 +465,10 @@ public class TonySession {
       taskInfo = new TaskInfo(jobName, taskIndex, Utils.constructContainerUrl(container));
     }
 
-    TonyTask(String jobName, String taskIndex, int sessionId, long startTime) {
+    TonyTask(String jobName, String taskIndex, int sessionId) {
       this.jobName = jobName;
       this.taskIndex = taskIndex;
       this.sessionId = sessionId;
-      this.startTime = startTime;
     }
 
     public void addContainer(Container container) {
