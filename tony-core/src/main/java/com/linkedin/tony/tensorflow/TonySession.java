@@ -244,10 +244,8 @@ public class TonySession {
     // worker failures will also fail the job but we don't short circuit the training because the training can still
     // continue, while if chief worker is dead, TensorFlow training will hang.
     // Also note that, we only short circuit when the chief worker failed, not finished.
-    // In addition, we support custom jobtype config`tony.application.stop.on.failure.jobtypes`,
-    // and we short circuit when that jobtype instance failed.
     if (exitCode != ContainerExitStatus.SUCCESS && exitCode != ContainerExitStatus.KILLED_BY_APPMASTER) {
-      if (isChief(jobName, jobIndex) || isStopOnFailure(jobName)) {
+      if (isChief(jobName, jobIndex)) {
         trainingFinished = true;
       }
       setFinalStatus(FinalApplicationStatus.FAILED, "Exit status: " + exitCode);
@@ -335,10 +333,6 @@ public class TonySession {
   public boolean isChief(String jobName, String index) {
     return jobName.equals(CHIEF_JOB_NAME) || (!jobTasks.containsKey(CHIEF_JOB_NAME)
         && jobName.equals(WORKER_JOB_NAME) && index.equals("0"));
-  }
-
-  public boolean isStopOnFailure(String jobName) {
-    return Arrays.asList(Utils.getStopOnFailureJobTypes(tonyConf)).contains(jobName);
   }
 
   public TonyTask getTask(ContainerId containerId) {
