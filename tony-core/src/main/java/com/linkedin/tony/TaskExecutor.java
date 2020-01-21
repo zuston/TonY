@@ -28,6 +28,8 @@ import org.apache.hadoop.yarn.api.ApplicationConstants;
 import org.apache.hadoop.yarn.api.records.ContainerId;
 
 import static com.linkedin.tony.TonyConfigurationKeys.MLFramework;
+import static java.util.Objects.requireNonNull;
+
 
 /**
  * Content that we want to run in the containers. TaskExecutor will register itself with AM and fetch cluster spec from
@@ -74,14 +76,13 @@ public class TaskExecutor {
   protected TaskExecutor() { }
 
   /**
-   * We bind to random ports and then release them, and these are the ports used by the task.
-   * However, there is the possibility that another process grabs the port between when it's released and used again.
+   *  We bind to random ports and reserve them up until before the underlying TF process is launched.
+   *  @See <a href="https://github.com/linkedin/TonY/issues/365">this issue</a> for details.
    */
   private void setupPorts() throws IOException {
     // Reserve a rpcSocket rpcPort.
     this.rpcSocket = new ServerSocket(0);
     this.rpcPort = this.rpcSocket.getLocalPort();
-    this.rpcSocket.close();
     LOG.info("Reserved rpcPort: " + this.rpcPort);
 
     // With Estimator API, there is a separate lone "chief" task that runs TensorBoard.
@@ -89,15 +90,29 @@ public class TaskExecutor {
     if (isChief) {
       this.tbSocket = new ServerSocket(0);
       this.tbPort = this.tbSocket.getLocalPort();
-      this.tbSocket.close();
       this.registerTensorBoardUrl();
       this.shellEnv.put(Constants.TB_PORT, String.valueOf(this.tbPort));
       LOG.info("Reserved tbPort: " + this.tbPort);
     }
   }
 
-  public static void main(String[] unused) throws Exception {
-    LOG.info("TaskExecutor is running..");
+  /**
+   * Release the reserved ports if any. This method has to be invoked after ports are created.
+   * @throws IOException
+   */
+  private void releasePorts() throws IOException {
+    try {
+      if (this.rpcSocket != null) {
+        this.rpcSocket.close();
+      }
+    } finally {
+      if (this.tbSocket != null) {
+        this.tbSocket.close();
+      }
+    }
+  }
+
+  public static TaskExecutor createExecutor() throws Exception {
     TaskExecutor executor = new TaskExecutor();
 
     executor.initConfigs();
@@ -151,6 +166,20 @@ public class TaskExecutor {
         break;
       default:
         throw new RuntimeException("Unsupported executor framework: " + executor.framework);
+    }
+
+    return executor;
+  }
+
+  public static void main(String[] args) throws Exception {
+    LOG.info("TaskExecutor is running..");
+    TaskExecutor executor = null;
+    try {
+      executor = requireNonNull(createExecutor());
+    } finally {
+      if (executor != null) {
+        executor.releasePorts();
+      }
     }
 
     int exitCode = Utils.executeShell(executor.taskCommand, executor.timeOut, executor.shellEnv);
