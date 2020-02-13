@@ -8,6 +8,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.linkedin.tony.rpc.MetricsRpc;
 import com.linkedin.tony.rpc.impl.ApplicationRpcClient;
 import com.linkedin.tony.util.Utils;
+
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -16,6 +17,8 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -114,6 +117,9 @@ public class TaskExecutor {
 
     executor.setupPorts();
     executor.clusterSpec = executor.registerAndGetClusterSpec();
+
+    setOpalExecutorEnv(executor);
+
     if (executor.clusterSpec == null) {
       LOG.error("Failed to register worker with AM.");
       throw new Exception("Failed to register worker with AM.");
@@ -155,6 +161,25 @@ public class TaskExecutor {
 
     LOG.info("Child process exited with exit code " + exitCode);
     System.exit(exitCode);
+  }
+
+  private static void setOpalExecutorEnv(TaskExecutor executor) {
+    String appIdString = System.getenv(Constants.APPLICATION_ID_STRING);
+    executor.shellEnv.put(Constants.APPLICATION_ID_STRING, appIdString);
+    LOG.info("Get enviroment_parameter : application_id = " + appIdString);
+
+    String opalUrl = System.getenv(Constants.OPAL_URL);
+    executor.shellEnv.put(Constants.OPAL_URL, opalUrl);
+
+    String submitType = System.getenv(Constants.TONY_SUBMIT_TYPE);
+    executor.shellEnv.put(Constants.TONY_SUBMIT_TYPE, submitType);
+    LOG.info("TONY_SUBMIT_TYPE : " + submitType);
+
+    String gearWorkflowId = System.getenv(Constants.GEAR_WORKFLOW_ID_KEY);
+    if (StringUtils.isNotEmpty(gearWorkflowId)) {
+      executor.shellEnv.put(Constants.GEAR_WORKFLOW_ID_KEY, gearWorkflowId);
+    }
+    LOG.info(Constants.GEAR_WORKFLOW_ID_KEY + " : " + gearWorkflowId);
   }
 
   protected void initConfigs() {

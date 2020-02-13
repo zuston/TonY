@@ -7,6 +7,7 @@ package com.linkedin.tony.cli;
 import com.linkedin.tony.Constants;
 import com.linkedin.tony.TonyClient;
 import com.linkedin.tony.TonyConfigurationKeys;
+import com.linkedin.tony.client.CallbackHandler;
 import com.linkedin.tony.client.TaskUpdateListener;
 import com.linkedin.tony.rpc.TaskInfo;
 import com.linkedin.tonyproxy.ProxyServer;
@@ -19,11 +20,18 @@ import java.util.Arrays;
 import java.util.Set;
 import java.util.UUID;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.methods.GetMethod;
+import org.apache.commons.httpclient.methods.PostMethod;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 
 import static com.linkedin.tony.Constants.TONY_FOLDER;
@@ -45,6 +53,24 @@ import static com.linkedin.tony.Constants.TONY_FOLDER;
  */
 public class NotebookSubmitter extends TonySubmitter {
   private static final Log LOG = LogFactory.getLog(NotebookSubmitter.class);
+  private static final String OPAL_URL = "http://opal-prod.online.qiyi.qae/api/v1";
+  private static final String OPAL_TEST_URL = "http://opal-test.online.qiyi.qae/api/v1";
+  private static final String OPAL_TOKEN = "78a6841d97b4451d89f3822a3c403734";
+  private static final String GEAR_URL = "http://gear.cloud.qiyi.domain";
+
+  private class AppRegisterHandler implements CallbackHandler {
+
+    @Override
+    public void onApplicationIdReceived(final ApplicationSubmissionContext appContext) {
+      registerToGear(appContext.getApplicationId());
+      registerToOpal(appContext);
+    }
+
+    @Override
+    public void afterApplicationSubmitted(ApplicationId appId, Set<TaskInfo> taskInfoSet) {
+
+    }
+  }
 
   private static class NotebookUpdateListener implements TaskUpdateListener {
     private Set<TaskInfo> taskInfos;
@@ -59,23 +85,130 @@ public class NotebookSubmitter extends TonySubmitter {
     }
   }
 
+  private void registerToOpal(ApplicationSubmissionContext appContext) {
+    String appId = appContext.getApplicationId().toString();
+    String url = getOpalEnvUrl() + "/tony/register?appId=" + appId;
+    String gearId = null;
+    String gearCluster = null;
+    if (fromGear()) {
+      String workflowActionId = System.getenv("GEAR_WORKFLOW_ACTION_ID");
+      gearId = workflowActionId.split("@")[0];
+      gearCluster = System.getenv("GEAR_CLUSTER");
+    }
+    url += gearId == null ? "" : "&workflowId=" + gearId;
+    url += gearCluster == null ? "" : "&cluster=" + gearCluster;
+    url += "&token=" + OPAL_TOKEN;
+    LOG.info("Registering to Opal, url is " + url);
+    httpPost(url, null);
+  }
+
+  private void updateStatusToOpal() {
+    if (!StringUtils.isEmpty(System.getenv("GEAR_WORKFLOW_ACTION_ID"))) {
+      String oozieJobId = System.getenv("GEAR_WORKFLOW_ACTION_ID");
+      String url = getOpalEnvUrl() + "/tony/kill/" + oozieJobId;
+      url += "&token=" + OPAL_TOKEN;
+      LOG.info("Update Status to Opal, url is " + url);
+      httpPost(url, null);
+    }
+  }
+
+  private static String getOpalEnvUrl() {
+    String testEnv = System.getenv("TEST_ENV");
+    String opalUrl = OPAL_URL;
+    if (!StringUtils.isEmpty(testEnv) && testEnv.equals("test")) {
+      opalUrl = OPAL_TEST_URL;
+    }
+    return opalUrl;
+  }
+
+  private boolean httpPost(String url, String body) {
+    PostMethod postMethod = null;
+    try {
+      HttpClient client = new HttpClient();
+      postMethod = new PostMethod(url);
+      if (body != null) {
+        postMethod.setRequestBody(body);
+      }
+      postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
+      int statusCode = client.executeMethod(postMethod);
+      postMethod.getResponseBody();
+      LOG.info("request to " + url + ", statusCode=" + statusCode);
+    } catch (Exception e) {
+      LOG.warn("Error request to " + url, e);
+      return false;
+    } finally {
+      if (postMethod != null) {
+        postMethod.releaseConnection();
+      }
+    }
+    return true;
+  }
+
+  private void registerToGear(ApplicationId appId) {
+    String gearCluster = System.getenv("GEAR_CLUSTER");
+    if (gearCluster != null) {
+      LOG.info("Env: GEAR_CLUSTER=" + gearCluster);
+    }
+    String gearWorkflowActionId = System.getenv("GEAR_WORKFLOW_ACTION_ID");
+    if (gearWorkflowActionId != null) {
+      LOG.info("Env: GEAR_WORKFLOW_ACTION_ID=" + gearWorkflowActionId);
+    }
+
+    if (gearWorkflowActionId != null) {
+      GetMethod method = null;
+      try {
+        // Register back to Gear
+        String[] split = gearWorkflowActionId.split("@");
+        String jobCluster = hdfsConf.get("fs.defaultFS").split("://", 2)[1];
+        String user = UserGroupInformation.getCurrentUser().getShortUserName();
+        String url = GEAR_URL + "/hadoop/doRegister?wf_cluster=" + gearCluster + "&wf_id=" + split[0]
+                + "&action_name=" + split[1] + "&job_cluster_nameservice=" + jobCluster + "&hadoop_job_id="
+                + appId.toString() + "&user=" + user;
+        LOG.info("Registering to Gear, url is " + url);
+        HttpClient client = new HttpClient();
+        method = new GetMethod(url);
+        method.addRequestHeader("Connection", "close");
+
+        int statusCode = client.executeMethod(method);
+        method.getResponseBody();
+        LOG.info("Registered to Gear, statusCode=" + statusCode);
+      } catch (Exception e) {
+        LOG.warn("Error registering to Gear", e);
+      } finally {
+        if (method != null) {
+          method.releaseConnection();
+        }
+      }
+    }
+  }
+
+  private boolean fromGear() {
+    if (System.getenv("GEAR_WORKFLOW_ACTION_ID") != null) {
+      return true;
+    }
+    return false;
+  }
+
   private NotebookUpdateListener listener;
+  private AppRegisterHandler handler;
   private TonyClient client;
 
   public NotebookSubmitter() {
+    handler = new AppRegisterHandler();
     listener = new NotebookUpdateListener();
-    client = new TonyClient(new Configuration());
+    client = new TonyClient(handler, new Configuration());
     client.addListener(listener);
   }
 
-  public int submit(String[] args)
-      throws ParseException, URISyntaxException, IOException, InterruptedException {
+
+  Configuration hdfsConf = new Configuration();
+
+  public int submit(String[] args) throws ParseException, URISyntaxException, IOException, InterruptedException {
     LOG.info("Starting NotebookSubmitter..");
     String jarPath = new File(NotebookSubmitter.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getPath();
 
     int exitCode = 0;
     Path cachedLibPath;
-    Configuration hdfsConf = new Configuration();
     try (FileSystem fs = FileSystem.get(hdfsConf)) {
       cachedLibPath = new Path(fs.getHomeDirectory(), TONY_FOLDER + Path.SEPARATOR + UUID.randomUUID().toString());
       fs.mkdirs(cachedLibPath);
@@ -86,11 +219,20 @@ public class NotebookSubmitter extends TonySubmitter {
       return -1;
     }
 
-    String[] updatedArgs = Arrays.copyOf(args, args.length + 4);
+    String[] updatedArgs = Arrays.copyOf(args, args.length + 8);
     updatedArgs[args.length] = "--hdfs_classpath";
     updatedArgs[args.length + 1] = cachedLibPath.toString();
     updatedArgs[args.length + 2] = "--conf";
     updatedArgs[args.length + 3] = TonyConfigurationKeys.APPLICATION_TIMEOUT + "=" + (24 * 60 * 60 * 1000);
+    updatedArgs[args.length + 4] = "--conf";
+    updatedArgs[args.length + 5] = Constants.TONY_SUBMIT_TYPE_TAG + "=notebook";
+    updatedArgs[args.length + 6] = "--conf";
+    String testEnv = System.getenv("TEST_ENV");
+    if (!StringUtils.isEmpty(testEnv) && testEnv.equals("test")) {
+      updatedArgs[args.length + 7] = Constants.TONY_OPAL_TEST + "=true";
+    } else {
+      updatedArgs[args.length + 7] = Constants.TONY_OPAL_TEST + "=false";
+    }
 
     client.init(updatedArgs);
     Thread clientThread = new Thread(client::start);
@@ -129,6 +271,7 @@ public class NotebookSubmitter extends TonySubmitter {
       Thread.sleep(1000);
     }
     clientThread.join();
+    updateStatusToOpal();
     return exitCode;
   }
 
