@@ -7,6 +7,7 @@ package com.linkedin.tony;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.gson.Gson;
 import com.linkedin.tony.events.ApplicationFinished;
 import com.linkedin.tony.events.ApplicationInited;
 import com.linkedin.tony.events.Event;
@@ -54,6 +55,8 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -471,6 +474,7 @@ public class ApplicationMaster {
       String amLogUrl = Utils.constructContainerUrl(hostname + ":"
           + System.getenv(ApplicationConstants.Environment.NM_HTTP_PORT.name()), containerId);
       redirectServer.setAmLogUrl(amLogUrl);
+      registerAmLogUrlOpal(amLogUrl);
       redirectServer.run();
       url = hostname + ":" + redirectServer.getPort();
     } catch (Exception e) {
@@ -1253,6 +1257,46 @@ public class ApplicationMaster {
       }
     }
   }
-
   //endregion
+
+  private void registerAmLogUrlOpal(String amLogUrl) {
+    String opalUrl = Constants.OPAL_URL_PROD;
+    if (tonyConf.getBoolean(Constants.TONY_OPAL_TEST, false)) {
+      opalUrl = Constants.OPAL_URL_TEST;
+    }
+    Set<TaskInfo> taskInfos = new HashSet<>();
+    taskInfos.add(new TaskInfo("am", "0", amLogUrl));
+    Gson gson = new Gson();
+    String params = gson.toJson(taskInfos);
+    try {
+      String url = opalUrl + "/api/v1/tfjob/update/log?&appId=" + appIdString;
+      url += "&token=" + Constants.OPAL_TOKEN;
+      httpPost(url, params);
+    } catch (Exception e) {
+      LOG.error("Failed to update task log info to opal", e);
+    }
+  }
+
+  private static boolean httpPost(String url, String body) {
+    PostMethod postMethod = null;
+    try {
+      HttpClient client = new HttpClient();
+      postMethod = new PostMethod(url);
+      if (body != null) {
+        postMethod.setRequestBody(body);
+      }
+      postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
+      int statusCode = client.executeMethod(postMethod);
+      postMethod.getResponseBody();
+      LOG.info("request to " + url + ", statusCode=" + statusCode);
+    } catch (Exception e) {
+      LOG.warn("Error request to " + url, e);
+      return false;
+    } finally {
+      if (postMethod != null) {
+        postMethod.releaseConnection();
+      }
+    }
+    return true;
+  }
 }

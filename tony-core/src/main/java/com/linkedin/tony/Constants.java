@@ -158,6 +158,7 @@ public class Constants {
   public static final String OPAL_URL = "OPAL_URL_PREFIX";
   public static final String OPAL_URL_TEST = "http://opal-test.online.qiyi.qae";
   public static final String OPAL_URL_PROD = "http://opal-prod.online.qiyi.qae";
+  public static final String OPAL_TOKEN = "78a6841d97b4451d89f3822a3c403734";
   public static final String TONY_OPAL_TEST = "tony.opal.test";
   public static final String TONY_SUBMIT_TYPE_TAG = "tony.opal.submit";
   public static final String TONY_SUBMIT_TYPE = "TONY_SUBMIT_TYPE";
