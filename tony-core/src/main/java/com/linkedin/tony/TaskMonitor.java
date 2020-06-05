@@ -34,7 +34,8 @@ class TaskMonitor implements Runnable {
   public static final List<String> METRICS_TO_COLLECT = ImmutableList.of(Constants.MAX_MEMORY_BYTES,
       Constants.AVG_MEMORY_BYTES, Constants.MAX_GPU_UTILIZATION, Constants.AVG_GPU_UTILIZATION,
       Constants.MAX_GPU_FB_MEMORY_USAGE, Constants.AVG_GPU_FB_MEMORY_USAGE,
-      Constants.MAX_GPU_MAIN_MEMORY_USAGE, Constants.AVG_GPU_MAIN_MEMORY_USAGE);
+      Constants.MAX_GPU_MAIN_MEMORY_USAGE, Constants.AVG_GPU_MAIN_MEMORY_USAGE,
+      Constants.MAX_CPU_USAGE, Constants.AVG_CPU_USAGE, Constants.CURRENT_CPU_USAGE, Constants.CURRENT_MEMORY_BYTES);
 
   public static final int MAX_MEMORY_BYTES_INDEX = 0;
   public static final int AVG_MEMORY_BYTES_INDEX = 1;
@@ -44,6 +45,10 @@ class TaskMonitor implements Runnable {
   public static final int AVG_GPU_FB_MEMORY_USAGE_INDEX = 5;
   public static final int MAX_GPU_MAIN_MEMORY_USAGE_INDEX = 6;
   public static final int AVG_GPU_MAIN_MEMORY_USAGE_INDEX = 7;
+  public static final int MAX_CPU_USAGE_INDEX = 8;
+  public static final int AVG_CPU_USAGE_INDEX = 9;
+  public static final int CURRENT_CPU_USAGE_INDEX = 10;
+  public static final int CURRENT_MEMORY_BYTES_INDEX = 11;
 
   private Boolean isGpuMachine;
 
@@ -109,6 +114,11 @@ class TaskMonitor implements Runnable {
     double memoryBytes = resourceCalculator.getRssMemorySize();
     setMaxMetrics(MAX_MEMORY_BYTES_INDEX, memoryBytes);
     setAvgMetrics(AVG_MEMORY_BYTES_INDEX, memoryBytes);
+    setCurrentMetrics(CURRENT_MEMORY_BYTES_INDEX, memoryBytes);
+    float cpuUsage = resourceCalculator.getCpuUsagePercent();
+    setMaxMetrics(MAX_CPU_USAGE_INDEX, cpuUsage);
+    setAvgMetrics(AVG_CPU_USAGE_INDEX, cpuUsage);
+    setCurrentMetrics(CURRENT_CPU_USAGE_INDEX, cpuUsage);
   }
 
   private void refreshGPUMetrics() {
@@ -176,6 +186,13 @@ class TaskMonitor implements Runnable {
       metric.setValue(newMetricValue);
       metrics.setMetric(metricIndex, metric);
     }
+  }
+
+  @VisibleForTesting
+  void setCurrentMetrics(int metricIndex, double newMetricValue) {
+    MetricWritable metric = metrics.getMetric(metricIndex);
+    metric.setValue(newMetricValue);
+    metrics.setMetric(metricIndex, metric);
   }
 
   @VisibleForTesting

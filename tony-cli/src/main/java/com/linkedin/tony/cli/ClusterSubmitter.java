@@ -155,7 +155,7 @@ public class ClusterSubmitter extends TonySubmitter {
         }
         postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
         int statusCode = client.executeMethod(postMethod);
-        postMethod.getResponseBody();
+        postMethod.getResponseBodyAsStream();
         LOG.info("request to " + url + ", statusCode=" + statusCode);
       } catch (Exception e) {
         LOG.warn("Error request to " + url, e);

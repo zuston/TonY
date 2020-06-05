@@ -48,7 +48,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.apache.commons.cli.CommandLine;
@@ -181,6 +184,10 @@ public class ApplicationMaster {
   private int maxConsecutiveHBMiss;
   private volatile boolean taskHasMissesHB = false;
   private Thread mainThread;
+
+  /** report metrics to opal **/
+  private MetricsReporter metricsReporter;
+  private final ScheduledExecutorService scheduledThreadPool = Executors.newScheduledThreadPool(1);
 
   private ApplicationMaster() {
     hdfsConf = new Configuration(false);
@@ -346,6 +353,9 @@ public class ApplicationMaster {
         LOG.error("Exception when we're starting TonyAM", e);
         return false;
       }
+
+      metricsReporter = new MetricsReporter(metricsRpcServer, appIdString, tonyConf);
+      scheduledThreadPool.scheduleAtFixedRate(metricsReporter, 0, 1000 * 60, TimeUnit.MILLISECONDS);
 
       succeeded = monitor();
       if (succeeded || amRetryCount == 0) {
@@ -882,6 +892,7 @@ public class ApplicationMaster {
         killChiefWorkerIfTesting(taskId);
       }
 
+      metricsReporter.addTask(task);
       // Return null until all tasks have registered
       int totalTasks = session.getTotalTasks();
       if (registeredTasks.size() == totalTasks) {
@@ -1216,6 +1227,7 @@ public class ApplicationMaster {
       }
 
       LOG.info("Container " + containerId + " for task " + task + " finished with exitStatus " + exitStatus + ".");
+      metricsReporter.deleteTask(task);
       session.onTaskCompleted(task.getJobName(), task.getTaskIndex(), exitStatus);
       eventHandler.emitEvent(new Event(EventType.TASK_FINISHED,
           new TaskFinished(task.getJobName(), Integer.parseInt(task.getTaskIndex()),
@@ -1287,7 +1299,7 @@ public class ApplicationMaster {
       }
       postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
       int statusCode = client.executeMethod(postMethod);
-      postMethod.getResponseBody();
+      postMethod.getResponseBodyAsStream();
       LOG.info("request to " + url + ", statusCode=" + statusCode);
     } catch (Exception e) {
       LOG.warn("Error request to " + url, e);

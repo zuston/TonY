@@ -154,6 +154,11 @@ public class Constants {
   public static final int MAX_REPEATED_GPU_ERROR_ALLOWED = 10;
 
   // Custom constants
+  public static final String MAX_CPU_USAGE = "MAX_CPU_USAGE";
+  public static final String AVG_CPU_USAGE = "AVG_CPU_USAGE";
+  public static final String CURRENT_CPU_USAGE = "CURRENT_CPU_USAGE";
+  public static final String CURRENT_MEMORY_BYTES = "CURRENT_MEMORY_BYTES";
+
   public static final String APPLICATION_ID_STRING = "APPLICATION_ID";
   public static final String OPAL_URL = "OPAL_URL_PREFIX";
   public static final String OPAL_URL_TEST = "http://opal-test.online.qiyi.qae";
