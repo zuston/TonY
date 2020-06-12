@@ -4,11 +4,6 @@
  */
 package com.linkedin.tony.tensorflow;
 
-import com.google.common.base.Preconditions;
-import com.linkedin.tony.Constants;
-import com.linkedin.tony.rpc.TaskInfo;
-import com.linkedin.tony.rpc.impl.TaskStatus;
-import com.linkedin.tony.util.Utils;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -17,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -31,6 +27,12 @@ import org.apache.hadoop.yarn.api.records.LocalResourceType;
 import org.apache.hadoop.yarn.api.records.LocalResourceVisibility;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.util.ConverterUtils;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.tony.Constants;
+import com.linkedin.tony.rpc.TaskInfo;
+import com.linkedin.tony.rpc.impl.TaskStatus;
+import com.linkedin.tony.util.Utils;
 
 import static com.linkedin.tony.Constants.CHIEF_JOB_NAME;
 import static com.linkedin.tony.Constants.WORKER_JOB_NAME;
@@ -263,8 +265,22 @@ public class TonySession {
       if (isChief(jobName, jobIndex) || shouldStopOnFailure(jobName)) {
         trainingFinished = true;
       }
-      setFinalStatus(FinalApplicationStatus.FAILED, "Exit status: " + exitCode);
+      String errorMsg = getErrMsg(jobName, jobIndex, exitCode);
+      setFinalStatus(FinalApplicationStatus.FAILED, "Exit status: " + exitCode + ", " + errorMsg);
     }
+  }
+
+  private String getErrMsg(String jobName, String jobIndex, int exitCode) {
+    String msg = String.format("Task [%s:%s] ", jobName, jobIndex);
+    switch (exitCode) {
+      case ContainerExitStatus.KILLED_EXCEEDED_PMEM:
+        msg += "killed due to out of memory.";
+        break;
+      default:
+        msg += "exits with non-zero status.";
+        break;
+    }
+    return msg;
   }
 
   /**
