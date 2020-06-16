@@ -7,6 +7,7 @@ package com.linkedin.tony.client;
 import java.util.Set;
 
 import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ApplicationReport;
 import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
 
 import com.linkedin.tony.rpc.TaskInfo;
@@ -20,4 +21,6 @@ public interface CallbackHandler {
     public void onApplicationIdReceived(final ApplicationSubmissionContext appContext);
 
     public void afterApplicationSubmitted(final ApplicationId appId, final Set<TaskInfo> taskInfoSet);
+
+    public void whenApplicationFailed(final ApplicationReport report);
 }

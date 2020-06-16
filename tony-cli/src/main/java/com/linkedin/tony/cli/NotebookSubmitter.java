@@ -31,6 +31,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ApplicationReport;
 import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 
@@ -68,6 +69,11 @@ public class NotebookSubmitter extends TonySubmitter {
 
     @Override
     public void afterApplicationSubmitted(ApplicationId appId, Set<TaskInfo> taskInfoSet) {
+
+    }
+
+    @Override
+    public void whenApplicationFailed(ApplicationReport report) {
 
     }
   }

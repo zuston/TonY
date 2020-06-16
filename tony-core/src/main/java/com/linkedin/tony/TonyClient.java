@@ -34,6 +34,7 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -893,6 +894,23 @@ public class TonyClient implements AutoCloseable {
       amRpcClient.finishApplication();
       LOG.info("Sent message to AM to stop.");
       amRpcClient = null;
+    }
+
+    if (!result) {
+      int maxRetry = 60;
+      int currentRetry = 0;
+      while (true) {
+        ApplicationReport report = yarnClient.getApplicationReport(appId);
+        String diagnostics = report.getDiagnostics();
+        LOG.info("Get finished, diagnostics : " + diagnostics + ", state: " + report.getYarnApplicationState() +
+                ", final yarn state: " + report.getFinalApplicationStatus());
+        if (StringUtils.isNotEmpty(diagnostics) || currentRetry >= maxRetry) {
+          callbackHandler.whenApplicationFailed(report);
+          break;
+        }
+        currentRetry++;
+        Thread.sleep(1000);
+      }
     }
 
     return result;

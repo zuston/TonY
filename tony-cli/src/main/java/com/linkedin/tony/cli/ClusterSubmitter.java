@@ -5,14 +5,6 @@
 
 package com.linkedin.tony.cli;
 
-import com.google.gson.Gson;
-import com.linkedin.tony.Constants;
-import com.linkedin.tony.TonyClient;
-import com.linkedin.tony.TonyConfigurationKeys;
-import com.linkedin.tony.client.CallbackHandler;
-import com.linkedin.tony.rpc.TaskInfo;
-import com.linkedin.tony.util.Utils;
-
 import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -32,9 +24,18 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ApplicationReport;
 import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
 import org.apache.hadoop.yarn.api.records.LocalResourceType;
 import org.apache.hadoop.yarn.exceptions.YarnException;
+
+import com.google.gson.Gson;
+import com.linkedin.tony.Constants;
+import com.linkedin.tony.TonyClient;
+import com.linkedin.tony.TonyConfigurationKeys;
+import com.linkedin.tony.client.CallbackHandler;
+import com.linkedin.tony.rpc.TaskInfo;
+import com.linkedin.tony.util.Utils;
 
 import static com.linkedin.tony.Constants.CORE_SITE_CONF;
 import static com.linkedin.tony.Constants.HADOOP_CONF_DIR;
@@ -59,6 +60,7 @@ public class ClusterSubmitter extends TonySubmitter {
   private static final String OPAL_TOKEN = "78a6841d97b4451d89f3822a3c403734";
   private static final String GEAR_URL = "http://gear.cloud.qiyi.domain";
   private static final String TONY_OPAL_TEST = "tony.opal.test";
+  private static String diagnostics;
   private static class AppRegisterHandler implements CallbackHandler {
 
     @Override
@@ -73,6 +75,12 @@ public class ClusterSubmitter extends TonySubmitter {
     @Override
     public void afterApplicationSubmitted(ApplicationId appId, Set<TaskInfo> taskInfoSet) {
       updateTaskInfoToOpal(appId, taskInfoSet);
+    }
+
+    @Override
+    public void whenApplicationFailed(ApplicationReport report) {
+      setDiagnostics(report.getDiagnostics());
+      LOG.info("callback diagnostics: " + report.getDiagnostics());
     }
 
     private void updateTaskInfoToOpal(ApplicationId appId, Set<TaskInfo> taskInfoSet) {
@@ -274,13 +282,16 @@ public class ClusterSubmitter extends TonySubmitter {
     return exitCode;
   }
 
-    public static void main(String[] args) throws ParseException, URISyntaxException {
+    public static void main(String[] args) throws Exception {
     int exitCode;
     Configuration configuration = new Configuration();
     setGearToConf(configuration);
     try (TonyClient tonyClient = new TonyClient(new AppRegisterHandler(), configuration)) {
       ClusterSubmitter submitter = new ClusterSubmitter(tonyClient);
       exitCode = submitter.submit(args);
+      if (isInGear() && exitCode != 0) {
+        throw new Exception(diagnostics);
+      }
     }
     System.exit(exitCode);
   }
@@ -290,5 +301,17 @@ public class ClusterSubmitter extends TonySubmitter {
     if (StringUtils.isNotEmpty(gearWorkflowId)) {
       configuration.set(Constants.GEAR_WORKFLOW_ID_KEY, gearWorkflowId);
     }
+  }
+
+  private static boolean isInGear() {
+    String gearWfId = System.getenv("GEAR_WORKFLOW_ACTION_ID");
+    if (StringUtils.isNotEmpty(gearWfId)) {
+      return true;
+    }
+    return false;
+  }
+
+  public static void setDiagnostics(String diagnostics) {
+    ClusterSubmitter.diagnostics = diagnostics;
   }
 }
