@@ -92,10 +92,17 @@ public class TaskExecutor {
     // With Estimator API, there is a separate lone "chief" task that runs TensorBoard.
     // With the low-level distributed API, worker 0 runs TensorBoard.
     if (isChief) {
-      this.tbPort = requireNonNull(allocatePort());
+      this.tbPort = requireNonNull(EphemeralPort.create());
       this.registerTensorBoardUrl();
       this.shellEnv.put(Constants.TB_PORT, String.valueOf(this.tbPort.getPort()));
       LOG.info("Reserved tbPort: " + this.tbPort.getPort());
+    }
+  }
+
+
+  private void releasePort(ServerPort port) throws Exception {
+    if (port != null) {
+      port.close();
     }
   }
 
@@ -104,13 +111,9 @@ public class TaskExecutor {
    */
   private void releasePorts() throws Exception {
     try {
-      if (this.rpcPort != null) {
-        this.rpcPort.close();
-      }
+      this.releasePort(this.rpcPort);
     } finally {
-      if (this.tbPort != null) {
-        this.tbPort.close();
-      }
+      this.releasePort(this.tbPort);
     }
   }
 
@@ -209,9 +212,13 @@ public class TaskExecutor {
     // If not reusing port, then reserve them up until before the underlying TF process is
     // launched. See <a href="https://github.com/linkedin/TonY/issues/365">this issue</a> for
     // details.
-    if (executor != null && !executor.isReusingPort()) {
-      LOG.info("Releasing reserved ports before launching tensorflow process.");
-      executor.releasePorts();
+    if (executor != null) {
+      LOG.info("Releasing reserved port(s) before launching tensorflow process.");
+      if (executor.isReusingPort()) {
+        executor.releasePort(executor.tbPort);
+      } else {
+        executor.releasePorts();
+      }
     }
 
     try {
@@ -225,7 +232,7 @@ public class TaskExecutor {
     } finally {
       if (executor.isReusingPort()) {
         LOG.info("Tensorflow process exited, releasing reserved ports.");
-        executor.releasePorts();
+        executor.releasePort(executor.rpcPort);
       }
     }
   }
