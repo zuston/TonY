@@ -305,7 +305,6 @@ public class Utils {
       taskProcess.waitFor();
     }
     return taskProcess.exitValue();
-
   }
 
   public static String getCurrentHostName() {
