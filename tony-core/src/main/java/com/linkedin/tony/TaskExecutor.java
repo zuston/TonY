@@ -11,7 +11,6 @@ import com.linkedin.tony.util.Utils;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -43,11 +42,8 @@ public class TaskExecutor {
   @VisibleForTesting
   protected Configuration tonyConf = new Configuration(false);
 
-  private ServerSocket rpcSocket;
-  private int rpcPort;
-
-  private ServerSocket tbSocket;
-  private int tbPort;
+  private ServerPort rpcPort;
+  private ServerPort tbPort;
 
   private int timeOut;
   private String amHost;
@@ -73,43 +69,72 @@ public class TaskExecutor {
   private int numFailedHBAttempts = 0;
   private MLFramework framework;
 
+  private String appIdString;
+
   protected TaskExecutor() { }
 
+  private ServerPort allocatePort() throws IOException {
+    // To prevent other process grabbing the reserved port between releasing the
+    // port{@link #releasePorts()} and task command process {@link #taskCommand} starts, task
+    // executor reserves the port with port reuse enabled on user's request. When port reuse
+    // is enabled, other process can grab the same port only when port reuse is turned on when
+    // creating the port.
+    return this.isReusingPort() ? ReusablePort.create() : EphemeralPort.create();
+  }
+
   /**
-   *  We bind to random ports and reserve them up until before the underlying TF process is launched.
-   *  @See <a href="https://github.com/linkedin/TonY/issues/365">this issue</a> for details.
+   * We bind to random ports.
    */
   private void setupPorts() throws IOException {
-    // Reserve a rpcSocket rpcPort.
-    this.rpcSocket = new ServerSocket(0);
-    this.rpcPort = this.rpcSocket.getLocalPort();
-    LOG.info("Reserved rpcPort: " + this.rpcPort);
-
+    // Reserve a rpcPort.
+    this.rpcPort = requireNonNull(allocatePort());
+    LOG.info("Reserved rpcPort: " + this.rpcPort.getPort());
     // With Estimator API, there is a separate lone "chief" task that runs TensorBoard.
     // With the low-level distributed API, worker 0 runs TensorBoard.
     if (isChief) {
-      this.tbSocket = new ServerSocket(0);
-      this.tbPort = this.tbSocket.getLocalPort();
+      this.tbPort = requireNonNull(EphemeralPort.create());
       this.registerTensorBoardUrl();
-      this.shellEnv.put(Constants.TB_PORT, String.valueOf(this.tbPort));
-      LOG.info("Reserved tbPort: " + this.tbPort);
+      this.shellEnv.put(Constants.TB_PORT, String.valueOf(this.tbPort.getPort()));
+      LOG.info("Reserved tbPort: " + this.tbPort.getPort());
+    }
+  }
+
+
+  private void releasePort(ServerPort port) throws Exception {
+    if (port != null) {
+      port.close();
     }
   }
 
   /**
-   * Release the reserved ports if any. This method has to be invoked after ports are created.
-   * @throws IOException
+   * Releases the reserved ports if any. This method has to be invoked after ports are created.
    */
-  private void releasePorts() throws IOException {
+  private void releasePorts() throws Exception {
     try {
-      if (this.rpcSocket != null) {
-        this.rpcSocket.close();
-      }
+      this.releasePort(this.rpcPort);
     } finally {
-      if (this.tbSocket != null) {
-        this.tbSocket.close();
-      }
+      this.releasePort(this.tbPort);
     }
+  }
+
+  /**
+   * @return true if reusing port is enabled by user, false otherwise.
+   */
+  private boolean isReusingPort() {
+    // TF_GRPC_REUSE_PORT corresponds to the environment variable defined in tensorflow, check
+    // https://github.com/tensorflow/tensorflow/pull/38705 for more details.
+
+    // Why is port reuse optional to users?
+    // - Port reuse in TF is only supported in TF 2.3+. User jobs might run with older TF
+    //   versions with no port reuse feature.
+
+    // Why is port reuse false by default?
+    // - If port reuse is true by default, it requires users working with tensorflow version without
+    //   port reuse support to disable port reuse explicitly, otherwise tensorflow job will fail due
+    //   to binding to the same port. Given as of now(2020/08) only TF 2.3 supports port reuse,
+    //   this option would require more change from users than otherwise, which is more risky
+    //   and thus less preferable.
+    return this.shellEnv.getOrDefault("TF_GRPC_REUSE_PORT", "false").equalsIgnoreCase("true");
   }
 
   public static TaskExecutor createExecutor() throws Exception {
@@ -171,25 +196,46 @@ public class TaskExecutor {
     return executor;
   }
 
-  public static void main(String[] args) throws Exception {
+  public static void main(String[] unused) throws Exception {
     LOG.info("TaskExecutor is running..");
     TaskExecutor executor = null;
     try {
       executor = requireNonNull(createExecutor());
-    } finally {
+    } catch (Exception ex) {
       if (executor != null) {
+        LOG.info("Failed to create TaskExecutor, releasing any reserved ports.");
+        executor.releasePorts();
+      }
+      throw ex;
+    }
+
+    // If not reusing port, then reserve them up until before the underlying TF process is
+    // launched. See <a href="https://github.com/linkedin/TonY/issues/365">this issue</a> for
+    // details.
+    if (executor != null) {
+      if (executor.isReusingPort()) {
+        LOG.info("Releasing reserved TB port before launching tensorflow process.");
+        executor.releasePort(executor.tbPort);
+      } else {
+        LOG.info("Releasing reserved port(s) before launching tensorflow process.");
         executor.releasePorts();
       }
     }
 
-    int exitCode = Utils.executeShell(executor.taskCommand, executor.timeOut, executor.shellEnv);
-    // START - worker skew testing:
-    executor.skewAndHangIfTesting();
-    // END - worker skew testing:
-    executor.registerExecutionResult(exitCode, executor.jobName, String.valueOf(executor.taskIndex));
-
-    LOG.info("Child process exited with exit code " + exitCode);
-    System.exit(exitCode);
+    try {
+      int exitCode = Utils.executeShell(executor.taskCommand, executor.timeOut, executor.shellEnv);
+      // START - worker skew testing:
+      executor.skewAndHangIfTesting();
+      // END - worker skew testing:
+      executor.registerExecutionResult(exitCode, executor.jobName, String.valueOf(executor.taskIndex));
+      LOG.info("Child process exited with exit code " + exitCode);
+      System.exit(exitCode);
+    } finally {
+      if (executor.isReusingPort()) {
+        LOG.info("Tensorflow process exited, releasing reserved RPC port.");
+        executor.releasePort(executor.rpcPort);
+      }
+    }
   }
 
   private static void setOpalExecutorEnv(TaskExecutor executor) {
@@ -260,15 +306,15 @@ public class TaskExecutor {
         0, hbInterval, TimeUnit.MILLISECONDS);
 
     LOG.info("Connecting to " + amHost + ":" + amPort + " to register worker spec: " + jobName + " " + taskIndex + " "
-             + hostName + ":" + rpcPort);
+             + hostName + ":" + this.rpcPort.getPort());
     return Utils.pollTillNonNull(() ->
         proxy.registerWorkerSpec(jobName + ":" + taskIndex,
-            hostName + ":" + rpcPort), 3, 0);
+            hostName + ":" + this.rpcPort.getPort()), 3, 0);
   }
 
   private void registerTensorBoardUrl() {
     String hostName = Utils.getCurrentHostName();
-    String tbUrl = hostName + ":" + tbPort;
+    String tbUrl = hostName + ":" + this.tbPort.getPort();
     LOG.info("TensorBoard address : " + tbUrl);
     String response = Utils.pollTillNonNull(() -> proxy.registerTensorBoardUrl(tbUrl), 1, 60);
     if (response != null) {
