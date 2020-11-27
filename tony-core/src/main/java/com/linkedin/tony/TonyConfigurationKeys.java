@@ -4,6 +4,7 @@
  */
 package com.linkedin.tony;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -261,4 +262,10 @@ public class TonyConfigurationKeys {
   // Configurations that can take multiple values.
   public static final List<String> MULTI_VALUE_CONF = Collections.unmodifiableList(
       Arrays.asList(CONTAINER_LAUNCH_ENV, EXECUTION_ENV, getContainerResourcesKey()));
+
+  // reserve port python process waiting time
+  public static final String RESERVE_PORT_PROCESS_WAITING_TIME = TONY_APPLICATION_PREFIX
+          + "reserve.port.python.process.wait.seconds";
+  public static final long DEFAULT_RESERV_PORT_PROCESS_WAITING_SECONDS =
+          Duration.ofHours(1).getSeconds();
 }

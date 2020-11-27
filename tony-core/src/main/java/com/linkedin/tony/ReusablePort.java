@@ -16,10 +16,6 @@
 
 package com.linkedin.tony;
 
-import static java.util.Objects.requireNonNull;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.BindException;
@@ -31,8 +27,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+
+import static com.linkedin.tony.TonyConfigurationKeys.DEFAULT_RESERV_PORT_PROCESS_WAITING_SECONDS;
+import static com.linkedin.tony.TonyConfigurationKeys.RESERVE_PORT_PROCESS_WAITING_TIME;
+import static java.util.Objects.requireNonNull;
 
 /**
  * This class encapsulates netty objects related to an established port which enables SO_REUSEPORT.
@@ -140,19 +145,28 @@ final class ReusablePort extends ServerPort {
     }
   }
 
+  static ReusablePort create() throws IOException {
+    return create(new Configuration(false));
+  }
+
   /**
    * Creates a binding port with SO_REUSEPORT.
    * See <a href="https://lwn.net/Articles/542629/">https://lwn.net/Articles/542629/</a> about
    * SO_REUSEPORT.
    * @return the created port
    */
-  static ReusablePort create() throws IOException {
+  static ReusablePort create(Configuration tonyConf) throws IOException {
     ReusablePort reusablePort;
     final int portBindingRetry = 5;
+    if (tonyConf == null) {
+      tonyConf = new Configuration(false);
+    }
+    long defaultReservePortProcessWaitTime = tonyConf.getLong(RESERVE_PORT_PROCESS_WAITING_TIME,
+            DEFAULT_RESERV_PORT_PROCESS_WAITING_SECONDS);
     for (int i = 0; i < portBindingRetry; i++) {
       try {
         LOG.info("Port binding attempt " + (i + 1) + " ....");
-        reusablePort = create(getAvailablePort());
+        reusablePort = create(getAvailablePort(), defaultReservePortProcessWaitTime);
         return reusablePort;
       } catch (BindException ex) {
         LOG.info("Port binding attempt " + (i + 1) + " failed.");
@@ -187,6 +201,11 @@ final class ReusablePort extends ServerPort {
     return Files.exists(fileToWait);
   }
 
+  @VisibleForTesting
+  static ReusablePort create(int port) throws IOException {
+    return create(port, DEFAULT_RESERV_PORT_PROCESS_WAITING_SECONDS);
+  }
+
   /**
    * Creates a binding port with python which has built-in port reuse support.
    * <p>port reuse feature is detailed in:
@@ -200,7 +219,7 @@ final class ReusablePort extends ServerPort {
    * @throws InterruptedException if the thread waiting for incoming connection is interrupted
    */
   @VisibleForTesting
-  static ReusablePort create(int port) throws IOException {
+  static ReusablePort create(int port, long defaultReservePortProcessWaitTime) throws IOException {
     // Why not upgrading TonY to Java 9+ given port reuse is supported in Java 9+?
     // - In Linkedin, as of now(2020/08), only Java 8 and 11 are officially supported, but Java 11
     //   introduces incompatibility with Play version tony-portal
@@ -210,7 +229,7 @@ final class ReusablePort extends ServerPort {
     Preconditions.checkArgument(port > 0, "Port must > 0.");
 
     String socketBindingProcess = String.format("python %s -p %s -d %s",
-        RESERVE_PORT_SCRIPT_PATH, port, Duration.ofHours(1).getSeconds());
+        RESERVE_PORT_SCRIPT_PATH, port, defaultReservePortProcessWaitTime);
 
     ProcessBuilder taskProcessBuilder = new ProcessBuilder("bash", "-c", socketBindingProcess);
     taskProcessBuilder.redirectError(ProcessBuilder.Redirect.INHERIT);
