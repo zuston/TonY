@@ -4,9 +4,10 @@
  */
 package com.linkedin.tony;
 
-import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.PostMethod;
@@ -24,12 +25,12 @@ public class MetricsReporter implements Runnable {
     private static final Log LOG = LogFactory.getLog(MetricsReporter.class);
 
     private MetricsRpcServer metricsRpcServer;
-    private List<TonyTask> tonyTasks;
+    private Set<TonyTask> tonyTasks;
     private Configuration tonyConf;
     private String appId;
 
     MetricsReporter(MetricsRpcServer metricsRpc, String appId, Configuration tonyConf) {
-        this.tonyTasks = new ArrayList<>();
+        this.tonyTasks = new HashSet<>();
         this.metricsRpcServer = metricsRpc;
         this.appId = appId;
         this.tonyConf = tonyConf;
@@ -37,9 +38,7 @@ public class MetricsReporter implements Runnable {
 
     public void addTask(TonyTask task) {
         try {
-            List<TonyTask> tasks = tonyTasks;
-            tonyTasks.add(task);
-            this.tonyTasks = tasks;
+            this.tonyTasks.add(task);
         } catch (Exception e) {
             LOG.info("Failed to add task " + task.getJobName() + " - " + task.getTaskIndex() + "to metricsReporter");
         }
@@ -47,7 +46,7 @@ public class MetricsReporter implements Runnable {
 
     public void deleteTask(TonyTask task) {
         try {
-            List<TonyTask> tasks = tonyTasks;
+            Set<TonyTask> tasks = tonyTasks;
             for (TonyTask t : tasks) {
                 if (t.getTaskIndex().equals(task.getTaskIndex()) && t.getJobName().equals(task.getJobName())) {
                     tasks.remove(t);
@@ -60,7 +59,6 @@ public class MetricsReporter implements Runnable {
                     + task.getTaskIndex() + "from metricsReporter");
         }
     }
-
 
     @Override
     public void run() {
@@ -108,21 +106,4 @@ public class MetricsReporter implements Runnable {
         }
         return opalUrl;
     }
-
-    public MetricsRpcServer getMetricsRpcServer() {
-        return metricsRpcServer;
-    }
-
-    public void setMetricsRpcServer(MetricsRpcServer metricsRpcServer) {
-        this.metricsRpcServer = metricsRpcServer;
-    }
-
-    public List<TonyTask> getTonyTasks() {
-        return tonyTasks;
-    }
-
-    public void setTonyTasks(List<TonyTask> tonyTasks) {
-        this.tonyTasks = tonyTasks;
-    }
-
 }
