@@ -46,14 +46,12 @@ public class MetricsReporter implements Runnable {
 
     public void deleteTask(TonyTask task) {
         try {
-            Set<TonyTask> tasks = tonyTasks;
-            for (TonyTask t : tasks) {
+            for (TonyTask t : tonyTasks) {
                 if (t.getTaskIndex().equals(task.getTaskIndex()) && t.getJobName().equals(task.getJobName())) {
-                    tasks.remove(t);
+                    tonyTasks.remove(t);
                     return;
                 }
             }
-            this.tonyTasks = tasks;
         } catch (Exception e) {
             LOG.info("Failed to delete task " + task.getJobName() + " - "
                     + task.getTaskIndex() + "from metricsReporter");
@@ -62,19 +60,25 @@ public class MetricsReporter implements Runnable {
 
     @Override
     public void run() {
+        try {
+            doMetricReport();
+        } catch (Exception e) {
+            LOG.error("Errors on schedule reporting metric.", e);
+        }
+    }
+
+    private void doMetricReport() {
+        if (tonyTasks == null || tonyTasks.size() == 0) {
+            LOG.error("Registered tony executors are empty. " + tonyTasks);
+            return;
+        }
         long currentTime = new Date().getTime();
         for (TonyTask task : tonyTasks) {
-            List<Metric> metrics = null;
+            PostMethod postMethod = null;
             try {
-                metrics = metricsRpcServer.getMetrics(task.getJobName(), Integer.parseInt(task.getTaskIndex()));
-            } catch (Exception e) {
-                LOG.info("Failed to get metrics of task " + task.getJobName() + " - " + task.getTaskIndex());
-                continue;
-            }
-            if (metrics != null && metrics.size() != 0) {
-                PostMethod postMethod = null;
-                String url = null;
-                try {
+                List<Metric> metrics = metricsRpcServer.getMetrics(task.getJobName(), Integer.parseInt(task.getTaskIndex()));
+                if (metrics != null && metrics.size() != 0) {
+                    String url = null;
                     url = getOpalEnvUrl() + "/api/v1/tfjob/resource/push?appId=" + appId + "&taskType="
                             + task.getJobName() + "&taskIndex=" + task.getTaskIndex() + "&currentTime=" + currentTime;
                     Gson gson = new Gson();
@@ -87,13 +91,12 @@ public class MetricsReporter implements Runnable {
                     postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
                     int statusCode = client.executeMethod(postMethod);
                     postMethod.getResponseBodyAsStream();
-                } catch (Exception e) {
-                    LOG.warn("Error request to " + url, e);
-                    continue;
-                } finally {
-                    if (postMethod != null) {
-                        postMethod.releaseConnection();
-                    }
+                }
+            } catch (Exception e) {
+                LOG.info("Failed to get and upload metrics of task: " + task.getJobName() + " - " + task.getTaskIndex(), e);
+            } finally {
+                if (postMethod != null) {
+                    postMethod.releaseConnection();
                 }
             }
         }
