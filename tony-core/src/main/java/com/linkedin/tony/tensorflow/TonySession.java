@@ -66,6 +66,10 @@ public class TonySession {
     TASK_TYPE_CHIEF, TASK_TYPE_PARAMETER_SERVER, TASK_TYPE_OTHERS
   }
 
+  public Configuration getTonyConf() {
+    return new Configuration(tonyConf);
+  }
+
   public String getTaskCommand() {
     StringBuilder cmd = new StringBuilder();
     cmd.append("$JAVA_HOME/bin/java ")

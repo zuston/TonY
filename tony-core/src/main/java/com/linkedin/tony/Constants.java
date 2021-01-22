@@ -95,6 +95,7 @@ public class Constants {
   public static final String WORKER_JOB_NAME = "worker";
   public static final String NOTEBOOK_JOB_NAME = "notebook";
   public static final String DRIVER_JOB_NAME = "driver";
+  public static final String EVALUATOR_JOB_NAME = "evaluator";
 
   public static final String ATTEMPT_NUMBER = "ATTEMPT_NUMBER";
 
