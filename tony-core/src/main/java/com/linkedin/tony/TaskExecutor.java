@@ -4,11 +4,6 @@
  */
 package com.linkedin.tony;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.linkedin.tony.rpc.MetricsRpc;
-import com.linkedin.tony.rpc.impl.ApplicationRpcClient;
-import com.linkedin.tony.util.Utils;
-
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.HashMap;
@@ -25,6 +20,11 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.ipc.RPC;
 import org.apache.hadoop.yarn.api.ApplicationConstants;
 import org.apache.hadoop.yarn.api.records.ContainerId;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.linkedin.tony.rpc.MetricsRpc;
+import com.linkedin.tony.rpc.impl.ApplicationRpcClient;
+import com.linkedin.tony.util.Utils;
 
 import static com.linkedin.tony.TonyConfigurationKeys.MLFramework;
 import static java.util.Objects.requireNonNull;
@@ -73,13 +73,13 @@ public class TaskExecutor {
 
   protected TaskExecutor() { }
 
-  private ServerPort allocatePort() throws IOException {
+  private ServerPort allocatePort(boolean isReusingPort) throws IOException {
     // To prevent other process grabbing the reserved port between releasing the
     // port{@link #releasePorts()} and task command process {@link #taskCommand} starts, task
     // executor reserves the port with port reuse enabled on user's request. When port reuse
     // is enabled, other process can grab the same port only when port reuse is turned on when
     // creating the port.
-    return this.isReusingPort() ? ReusablePort.create(tonyConf) : EphemeralPort.create();
+    return isReusingPort ? ReusablePort.create(tonyConf) : EphemeralPort.create();
   }
 
   /**
@@ -87,12 +87,12 @@ public class TaskExecutor {
    */
   private void setupPorts() throws IOException {
     // Reserve a rpcPort.
-    this.rpcPort = requireNonNull(allocatePort());
+    this.rpcPort = requireNonNull(allocatePort(this.isTFGrpcReusingPort()));
     LOG.info("Reserved rpcPort: " + this.rpcPort.getPort());
     // With Estimator API, there is a separate lone "chief" task that runs TensorBoard.
     // With the low-level distributed API, worker 0 runs TensorBoard.
     if (isChief) {
-      this.tbPort = requireNonNull(EphemeralPort.create());
+      this.tbPort = requireNonNull(allocatePort(this.isTBServerReusingPort()));
       this.registerTensorBoardUrl();
       this.shellEnv.put(Constants.TB_PORT, String.valueOf(this.tbPort.getPort()));
       LOG.info("Reserved tbPort: " + this.tbPort.getPort());
@@ -120,7 +120,7 @@ public class TaskExecutor {
   /**
    * @return true if reusing port is enabled by user, false otherwise.
    */
-  private boolean isReusingPort() {
+  private boolean isTFGrpcReusingPort() {
     // TF_GRPC_REUSE_PORT corresponds to the environment variable defined in tensorflow, check
     // https://github.com/tensorflow/tensorflow/pull/38705 for more details.
 
@@ -135,6 +135,10 @@ public class TaskExecutor {
     //   this option would require more change from users than otherwise, which is more risky
     //   and thus less preferable.
     return this.shellEnv.getOrDefault("TF_GRPC_REUSE_PORT", "false").equalsIgnoreCase("true");
+  }
+
+  private boolean isTBServerReusingPort() {
+    return this.shellEnv.getOrDefault("TB_SERVER_REUSE_PORT", "false").equalsIgnoreCase("true");
   }
 
   public static TaskExecutor createExecutor() throws Exception {
@@ -213,12 +217,14 @@ public class TaskExecutor {
     // launched. See <a href="https://github.com/linkedin/TonY/issues/365">this issue</a> for
     // details.
     if (executor != null) {
-      if (executor.isReusingPort()) {
+      if (!executor.isTFGrpcReusingPort()) {
+        LOG.info("Releasing reserved RPC port before launching tensorflow process.");
+        executor.releasePort(executor.rpcPort);
+      }
+
+      if (!executor.isTBServerReusingPort()) {
         LOG.info("Releasing reserved TB port before launching tensorflow process.");
         executor.releasePort(executor.tbPort);
-      } else {
-        LOG.info("Releasing reserved port(s) before launching tensorflow process.");
-        executor.releasePorts();
       }
     }
 
@@ -231,9 +237,14 @@ public class TaskExecutor {
       LOG.info("Child process exited with exit code " + exitCode);
       System.exit(exitCode);
     } finally {
-      if (executor.isReusingPort()) {
+      if (executor.isTFGrpcReusingPort()) {
         LOG.info("Tensorflow process exited, releasing reserved RPC port.");
         executor.releasePort(executor.rpcPort);
+      }
+
+      if (executor.isTBServerReusingPort()) {
+        LOG.info("Tensorflow process exited, releasing reserved TB port.");
+        executor.releasePort(executor.tbPort);
       }
     }
   }
