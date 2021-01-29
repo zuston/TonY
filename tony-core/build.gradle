@@ -31,6 +31,9 @@ dependencies {
   // Only needed by Hadoop test classes
   testRuntime deps.external.junit
   testRuntime deps.external.slf4j_api
+
+  compile deps.tensorflow.tensorflow_connector
+  compile deps.tensorflow.tensorflow_proto
 }
 
 task setupHdfsLib(type: Copy) {

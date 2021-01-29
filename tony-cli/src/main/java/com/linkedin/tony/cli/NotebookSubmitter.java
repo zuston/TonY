@@ -4,13 +4,6 @@
  */
 package com.linkedin.tony.cli;
 
-import com.linkedin.tony.Constants;
-import com.linkedin.tony.TonyClient;
-import com.linkedin.tony.TonyConfigurationKeys;
-import com.linkedin.tony.client.CallbackHandler;
-import com.linkedin.tony.client.TaskUpdateListener;
-import com.linkedin.tony.rpc.TaskInfo;
-import com.linkedin.tonyproxy.ProxyServer;
 import java.io.File;
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -19,10 +12,10 @@ import java.net.URL;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.UUID;
+
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.GetMethod;
-import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -35,8 +28,16 @@ import org.apache.hadoop.yarn.api.records.ApplicationReport;
 import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 
-import static com.linkedin.tony.Constants.TONY_FOLDER;
+import com.linkedin.tony.Constants;
+import com.linkedin.tony.TonyClient;
+import com.linkedin.tony.TonyConfigurationKeys;
+import com.linkedin.tony.client.CallbackHandler;
+import com.linkedin.tony.client.TaskUpdateListener;
+import com.linkedin.tony.rpc.TaskInfo;
+import com.linkedin.tony.util.OpalUtils;
+import com.linkedin.tonyproxy.ProxyServer;
 
+import static com.linkedin.tony.Constants.TONY_FOLDER;
 
 /**
  * NotebookSubmitter is used to submit a python pex file (for example Jupyter Notebook) to run inside a cluster.
@@ -105,7 +106,7 @@ public class NotebookSubmitter extends TonySubmitter {
     url += gearCluster == null ? "" : "&cluster=" + gearCluster;
     url += "&token=" + OPAL_TOKEN;
     LOG.info("Registering to Opal, url is " + url);
-    httpPost(url, null);
+    OpalUtils.httpPost(url, null);
   }
 
   private void updateStatusToOpal() {
@@ -114,7 +115,7 @@ public class NotebookSubmitter extends TonySubmitter {
       String url = getOpalEnvUrl() + "/tony/kill/" + oozieJobId;
       url += "&token=" + OPAL_TOKEN;
       LOG.info("Update Status to Opal, url is " + url);
-      httpPost(url, null);
+      OpalUtils.httpPost(url, null);
     }
   }
 
@@ -125,29 +126,6 @@ public class NotebookSubmitter extends TonySubmitter {
       opalUrl = OPAL_TEST_URL;
     }
     return opalUrl;
-  }
-
-  private boolean httpPost(String url, String body) {
-    PostMethod postMethod = null;
-    try {
-      HttpClient client = new HttpClient();
-      postMethod = new PostMethod(url);
-      if (body != null) {
-        postMethod.setRequestBody(body);
-      }
-      postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
-      int statusCode = client.executeMethod(postMethod);
-      postMethod.getResponseBody();
-      LOG.info("request to " + url + ", statusCode=" + statusCode);
-    } catch (Exception e) {
-      LOG.warn("Error request to " + url, e);
-      return false;
-    } finally {
-      if (postMethod != null) {
-        postMethod.releaseConnection();
-      }
-    }
-    return true;
   }
 
   private void registerToGear(ApplicationId appId) {

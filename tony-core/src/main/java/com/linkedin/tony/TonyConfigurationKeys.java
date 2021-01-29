@@ -120,6 +120,12 @@ public class TonyConfigurationKeys {
 
   public static final String APPLICATION_TAGS = TONY_APPLICATION_PREFIX + "tags";
 
+  public static final String APPLICATION_TF_EVENT_OUTPUT = TONY_APPLICATION_PREFIX + "tf.event.output.path";
+
+  // unit: millis seconds
+  public static final String APPLICATION_TF_EVENT_COLLECT_INTERVAL =
+          TONY_APPLICATION_PREFIX + "tf.event.collect.interval";
+
   // Task configurations
   public static final String TONY_TASK_PREFIX = TONY_PREFIX + "task.";
 
@@ -155,6 +161,11 @@ public class TonyConfigurationKeys {
 
   public static final String AM_GPUS = AM_PREFIX + "gpus";
   public static final int DEFAULT_AM_GPUS = 0;
+
+  public static final String AM_PLUGIN_TASKS_ENABLED = AM_PREFIX + "plugin.tasks.enabled";
+  public static final boolean DEFAULT_AM_PLUGIN_TASKS_ENABLED = false;
+
+  public static final String AM_PLUGIN_TASKS = AM_PREFIX + "plugin.tasks";
 
   // Keys/default values for configurable TensorFlow job names
   public static final String INSTANCES_REGEX = "tony\\.([a-z]+)\\.instances";

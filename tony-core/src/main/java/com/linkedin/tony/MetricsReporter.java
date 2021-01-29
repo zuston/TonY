@@ -9,8 +9,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.commons.httpclient.HttpClient;
-import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -19,6 +17,7 @@ import com.google.gson.Gson;
 import com.linkedin.tony.events.Metric;
 import com.linkedin.tony.rpc.impl.MetricsRpcServer;
 import com.linkedin.tony.tensorflow.TonySession.TonyTask;
+import com.linkedin.tony.util.OpalUtils;
 
 public class MetricsReporter implements Runnable {
 
@@ -36,7 +35,7 @@ public class MetricsReporter implements Runnable {
         this.tonyConf = tonyConf;
     }
 
-    public void addTask(TonyTask task) {
+    public synchronized void addTask(TonyTask task) {
         try {
             this.tonyTasks.add(task);
         } catch (Exception e) {
@@ -44,7 +43,7 @@ public class MetricsReporter implements Runnable {
         }
     }
 
-    public void deleteTask(TonyTask task) {
+    public synchronized void deleteTask(TonyTask task) {
         try {
             for (TonyTask t : tonyTasks) {
                 if (t.getTaskIndex().equals(task.getTaskIndex()) && t.getJobName().equals(task.getJobName())) {
@@ -74,30 +73,21 @@ public class MetricsReporter implements Runnable {
         }
         long currentTime = new Date().getTime();
         for (TonyTask task : tonyTasks) {
-            PostMethod postMethod = null;
             try {
                 List<Metric> metrics = metricsRpcServer.getMetrics(task.getJobName(), Integer.parseInt(task.getTaskIndex()));
                 if (metrics != null && metrics.size() != 0) {
-                    String url = null;
-                    url = getOpalEnvUrl() + "/api/v1/tfjob/resource/push?appId=" + appId + "&taskType="
+                    String url = getOpalEnvUrl() + "/api/v1/tfjob/resource/push?appId=" + appId + "&taskType="
                             + task.getJobName() + "&taskIndex=" + task.getTaskIndex() + "&currentTime=" + currentTime;
                     Gson gson = new Gson();
                     String body = gson.toJson(metrics);
-                    HttpClient client = new HttpClient();
-                    postMethod = new PostMethod(url);
-                    if (body != null) {
-                        postMethod.setRequestBody(body);
+
+                    boolean httpOk = OpalUtils.httpPost(url, body);
+                    if (!httpOk) {
+                        LOG.error("Errors on reporting metrics: " + task.getJobName() + " - " + task.getTaskIndex());
                     }
-                    postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
-                    int statusCode = client.executeMethod(postMethod);
-                    postMethod.getResponseBodyAsStream();
                 }
             } catch (Exception e) {
                 LOG.info("Failed to get and upload metrics of task: " + task.getJobName() + " - " + task.getTaskIndex(), e);
-            } finally {
-                if (postMethod != null) {
-                    postMethod.releaseConnection();
-                }
             }
         }
     }

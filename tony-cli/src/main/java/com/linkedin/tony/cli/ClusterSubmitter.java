@@ -15,7 +15,6 @@ import java.util.UUID;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.GetMethod;
-import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -35,6 +34,7 @@ import com.linkedin.tony.TonyClient;
 import com.linkedin.tony.TonyConfigurationKeys;
 import com.linkedin.tony.client.CallbackHandler;
 import com.linkedin.tony.rpc.TaskInfo;
+import com.linkedin.tony.util.OpalUtils;
 import com.linkedin.tony.util.Utils;
 
 import static com.linkedin.tony.Constants.CORE_SITE_CONF;
@@ -89,7 +89,7 @@ public class ClusterSubmitter extends TonySubmitter {
       try {
         String url = getOpalEnvUrl() + "/tfjob/update/log?&appId=" + appId;
         url += "&token=" + OPAL_TOKEN;
-        httpPost(url, params);
+        OpalUtils.httpPost(url, params);
       } catch (Exception e) {
         LOG.error("Failed to update task log info to opal", e);
       }
@@ -134,7 +134,7 @@ public class ClusterSubmitter extends TonySubmitter {
 
       url += "&token=" + OPAL_TOKEN;
       LOG.info("Registering to Opal, url is " + url);
-      httpPost(url, client.getTonyUserConfStr());
+      OpalUtils.httpPost(url, client.getTonyUserConfStr());
     }
 
       private static String getOpalEnvUrl() {
@@ -151,29 +151,6 @@ public class ClusterSubmitter extends TonySubmitter {
         return true;
       }
       return false;
-    }
-
-    private static boolean httpPost(String url, String body) {
-      PostMethod postMethod = null;
-      try {
-        HttpClient client = new HttpClient();
-        postMethod = new PostMethod(url);
-        if (body != null) {
-            postMethod.setRequestBody(body);
-        }
-        postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
-        int statusCode = client.executeMethod(postMethod);
-        postMethod.getResponseBodyAsStream();
-        LOG.info("request to " + url + ", statusCode=" + statusCode);
-      } catch (Exception e) {
-        LOG.warn("Error request to " + url, e);
-        return false;
-      } finally {
-        if (postMethod != null) {
-          postMethod.releaseConnection();
-        }
-      }
-      return true;
     }
 
     private void registerToGear(ApplicationId appId) {
@@ -220,7 +197,7 @@ public class ClusterSubmitter extends TonySubmitter {
       String appId = client.getAppId().toString();
       String updateStatusUrl = AppRegisterHandler.getOpalEnvUrl() + "/tfjob/update/status?status=" + status + "&appId=" + appId;
       updateStatusUrl += "&token=" + OPAL_TOKEN;
-      AppRegisterHandler.httpPost(updateStatusUrl, null);
+      OpalUtils.httpPost(updateStatusUrl, null);
     }
 
     private void pushStatus2Opal(int exitCode) {

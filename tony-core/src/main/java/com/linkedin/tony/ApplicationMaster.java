@@ -4,30 +4,6 @@
  */
 package com.linkedin.tony;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
-import com.google.gson.Gson;
-import com.linkedin.tony.events.ApplicationFinished;
-import com.linkedin.tony.events.ApplicationInited;
-import com.linkedin.tony.events.Event;
-import com.linkedin.tony.events.EventHandler;
-import com.linkedin.tony.events.EventType;
-import com.linkedin.tony.events.TaskFinished;
-import com.linkedin.tony.events.TaskStarted;
-import com.linkedin.tony.models.JobMetadata;
-import com.linkedin.tony.rpc.ApplicationRpc;
-import com.linkedin.tony.rpc.ApplicationRpcServer;
-import com.linkedin.tony.rpc.MetricsRpc;
-import com.linkedin.tony.rpc.TaskInfo;
-import com.linkedin.tony.rpc.impl.MetricsRpcServer;
-import com.linkedin.tony.rpc.impl.TaskStatus;
-import com.linkedin.tony.tensorflow.TensorFlowContainerRequest;
-import com.linkedin.tony.tensorflow.TensorFlowRedirectServer;
-import com.linkedin.tony.tensorflow.TonySession;
-import com.linkedin.tony.tensorflow.TonySession.TonyTask;
-import com.linkedin.tony.util.Utils;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -48,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -58,8 +35,6 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
-import org.apache.commons.httpclient.HttpClient;
-import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -100,6 +75,37 @@ import org.apache.hadoop.yarn.security.client.ClientToAMTokenIdentifier;
 import org.apache.hadoop.yarn.security.client.ClientToAMTokenSecretManager;
 import org.apache.hadoop.yarn.util.AbstractLivelinessMonitor;
 import org.apache.hadoop.yarn.util.UTCClock;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.google.gson.Gson;
+import com.linkedin.tony.events.ApplicationFinished;
+import com.linkedin.tony.events.ApplicationInited;
+import com.linkedin.tony.events.Event;
+import com.linkedin.tony.events.EventHandler;
+import com.linkedin.tony.events.EventType;
+import com.linkedin.tony.events.TaskFinished;
+import com.linkedin.tony.events.TaskStarted;
+import com.linkedin.tony.models.JobMetadata;
+import com.linkedin.tony.plugin.TFEvalMetricCollector;
+import com.linkedin.tony.plugin.TFTrainMetricCollector;
+import com.linkedin.tony.rpc.ApplicationRpc;
+import com.linkedin.tony.rpc.ApplicationRpcServer;
+import com.linkedin.tony.rpc.MetricsRpc;
+import com.linkedin.tony.rpc.TaskInfo;
+import com.linkedin.tony.rpc.impl.MetricsRpcServer;
+import com.linkedin.tony.rpc.impl.TaskStatus;
+import com.linkedin.tony.tensorflow.TensorFlowContainerRequest;
+import com.linkedin.tony.tensorflow.TensorFlowRedirectServer;
+import com.linkedin.tony.tensorflow.TonySession;
+import com.linkedin.tony.tensorflow.TonySession.TonyTask;
+import com.linkedin.tony.util.OpalUtils;
+import com.linkedin.tony.util.Utils;
+
+import static com.linkedin.tony.TonyConfigurationKeys.AM_PLUGIN_TASKS;
+import static com.linkedin.tony.TonyConfigurationKeys.AM_PLUGIN_TASKS_ENABLED;
+import static com.linkedin.tony.TonyConfigurationKeys.DEFAULT_AM_PLUGIN_TASKS_ENABLED;
 
 
 public class ApplicationMaster {
@@ -188,6 +194,13 @@ public class ApplicationMaster {
   /** report metrics to opal **/
   private MetricsReporter metricsReporter;
   private final ScheduledExecutorService scheduledThreadPool = Executors.newScheduledThreadPool(1);
+
+  /**
+   * how to support tensorflow metric collect?
+   * 1. enabled TonY plugin tasks by config
+   * 2. put plugin tasks into executor thread pool
+   */
+  private final ExecutorService pluginExecutorsThreadPool = Executors.newCachedThreadPool();
 
   private ApplicationMaster() {
     hdfsConf = new Configuration(false);
@@ -354,6 +367,10 @@ public class ApplicationMaster {
         return false;
       }
 
+      // inject task plugin executor to run
+      // TODO: 1/21/21 when retry, it should not start
+      startPluginTasks();
+
       metricsReporter = new MetricsReporter(metricsRpcServer, appIdString, tonyConf);
       scheduledThreadPool.scheduleAtFixedRate(metricsReporter, 0, 1000 * 60, TimeUnit.MILLISECONDS);
 
@@ -383,6 +400,34 @@ public class ApplicationMaster {
     eventHandler.stop(jobDir, metadata);
 
     return succeeded;
+  }
+
+  /**
+   * Trigger plugin tasks. This part isn't shared across different retries.
+   */
+  private void startPluginTasks() {
+    boolean enablePluginTasks = tonyConf.getBoolean(AM_PLUGIN_TASKS_ENABLED, DEFAULT_AM_PLUGIN_TASKS_ENABLED);
+    LOG.info("Application master enable plugin tasks: " + enablePluginTasks);
+    if (!enablePluginTasks) {
+      return;
+    }
+
+    String[] pluginTasks = tonyConf.getStrings(AM_PLUGIN_TASKS, "TFMetricCollector");
+    LOG.info("Application master plugin tasks: [" + StringUtils.join(pluginTasks, ",") + "]");
+    if (null == pluginTasks) {
+      return;
+    }
+
+    for (String pluginTaskName : pluginTasks) {
+      switch (pluginTaskName) {
+        case "TFMetricCollector":
+          pluginExecutorsThreadPool.submit(new TFEvalMetricCollector(appIdString, session));
+          pluginExecutorsThreadPool.submit(new TFTrainMetricCollector(appIdString, session));
+          break;
+        default:
+          break;
+      }
+    }
   }
 
   /**
@@ -1283,32 +1328,9 @@ public class ApplicationMaster {
     try {
       String url = opalUrl + "/api/v1/tfjob/update/log?&appId=" + appIdString;
       url += "&token=" + Constants.OPAL_TOKEN;
-      httpPost(url, params);
+      OpalUtils.httpPost(url, params);
     } catch (Exception e) {
       LOG.error("Failed to update task log info to opal", e);
     }
-  }
-
-  private static boolean httpPost(String url, String body) {
-    PostMethod postMethod = null;
-    try {
-      HttpClient client = new HttpClient();
-      postMethod = new PostMethod(url);
-      if (body != null) {
-        postMethod.setRequestBody(body);
-      }
-      postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
-      int statusCode = client.executeMethod(postMethod);
-      postMethod.getResponseBodyAsStream();
-      LOG.info("request to " + url + ", statusCode=" + statusCode);
-    } catch (Exception e) {
-      LOG.warn("Error request to " + url, e);
-      return false;
-    } finally {
-      if (postMethod != null) {
-        postMethod.releaseConnection();
-      }
-    }
-    return true;
   }
 }
