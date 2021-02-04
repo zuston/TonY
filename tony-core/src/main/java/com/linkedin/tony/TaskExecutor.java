@@ -60,6 +60,7 @@ public class TaskExecutor {
   private String taskId;
   private int numTasks;
   private boolean isChief;
+  private TonyConfigurationKeys.DistributedMode distributedMode;
   private Configuration yarnConf = new Configuration(false);
   private Configuration hdfsConf = new Configuration(false);
   private ApplicationRpcClient proxy;
@@ -91,14 +92,13 @@ public class TaskExecutor {
     LOG.info("Reserved rpcPort: " + this.rpcPort.getPort());
     // With Estimator API, there is a separate lone "chief" task that runs TensorBoard.
     // With the low-level distributed API, worker 0 runs TensorBoard.
-    if (isChief) {
+    if (isChief && isClusterMode()) {
       this.tbPort = requireNonNull(allocatePort(this.isTBServerReusingPort()));
       this.registerTensorBoardUrl();
       this.shellEnv.put(Constants.TB_PORT, String.valueOf(this.tbPort.getPort()));
       LOG.info("Reserved tbPort: " + this.tbPort.getPort());
     }
   }
-
 
   private void releasePort(ServerPort port) throws Exception {
     if (port != null) {
@@ -168,6 +168,7 @@ public class TaskExecutor {
       LOG.error("Failed to register worker with AM.");
       throw new Exception("Failed to register worker with AM.");
     }
+    LOG.info("Task is on distributed mode: " + executor.distributedMode);
     LOG.info("Successfully registered and got cluster spec: " + executor.clusterSpec);
 
     switch (executor.framework) {
@@ -175,8 +176,15 @@ public class TaskExecutor {
         LOG.info("Setting up TensorFlow job...");
         executor.shellEnv.put(Constants.JOB_NAME, String.valueOf(executor.jobName));
         executor.shellEnv.put(Constants.TASK_INDEX, String.valueOf(executor.taskIndex));
-        executor.shellEnv.put(Constants.CLUSTER_SPEC, String.valueOf(executor.clusterSpec));
-        executor.shellEnv.put(Constants.TF_CONFIG, Utils.constructTFConfig(executor.clusterSpec, executor.jobName, executor.taskIndex));
+        executor.shellEnv.put(Constants.TASK_NUM, String.valueOf(executor.numTasks));
+        executor.shellEnv.put(Constants.DISTRUBUTED_MODE_NAME, executor.distributedMode.name());
+        if (executor.isClusterMode()) {
+          executor.shellEnv.put(Constants.CLUSTER_SPEC, String.valueOf(executor.clusterSpec));
+          executor.shellEnv.put(
+                  Constants.TF_CONFIG,
+                  Utils.constructTFConfig(executor.clusterSpec, executor.jobName, executor.taskIndex)
+          );
+        }
         break;
       case PYTORCH:
         LOG.info("Setting up PyTorch job...");
@@ -278,6 +286,9 @@ public class TaskExecutor {
     String isChiefEnvValue = System.getenv(Constants.IS_CHIEF);
     isChief = Boolean.parseBoolean(isChiefEnvValue);
 
+    String distributedModeEnvValue = System.getenv(Constants.DISTRUBUTED_MODE_NAME);
+    distributedMode = TonyConfigurationKeys.DistributedMode.valueOf(distributedModeEnvValue.toUpperCase());
+
     amHost = System.getenv(Constants.AM_HOST);
     amPort = Integer.parseInt(System.getenv(Constants.AM_PORT));
 
@@ -318,6 +329,7 @@ public class TaskExecutor {
 
     LOG.info("Connecting to " + amHost + ":" + amPort + " to register worker spec: " + jobName + " " + taskIndex + " "
              + hostName + ":" + this.rpcPort.getPort());
+
     return Utils.pollTillNonNull(() ->
         proxy.registerWorkerSpec(jobName + ":" + taskIndex,
             hostName + ":" + this.rpcPort.getPort()), 3, 0);
@@ -404,5 +416,12 @@ public class TaskExecutor {
         LOG.error("Got Exception while parsing skew instruction", e);
       }
     }
+  }
+
+  private boolean isClusterMode() {
+    if (distributedMode == TonyConfigurationKeys.DistributedMode.CLUSTER) {
+      return true;
+    }
+    return false;
   }
 }

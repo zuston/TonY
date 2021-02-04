@@ -106,6 +106,7 @@ import com.linkedin.tony.util.Utils;
 import static com.linkedin.tony.TonyConfigurationKeys.AM_PLUGIN_TASKS;
 import static com.linkedin.tony.TonyConfigurationKeys.AM_PLUGIN_TASKS_ENABLED;
 import static com.linkedin.tony.TonyConfigurationKeys.DEFAULT_AM_PLUGIN_TASKS_ENABLED;
+import static com.linkedin.tony.TonyConfigurationKeys.DEFAULT_APPLICATION_DISTRIBUTED_MODE;
 
 
 public class ApplicationMaster {
@@ -123,6 +124,7 @@ public class ApplicationMaster {
   private Path jobDir = null;
   private String user = null;
   private BlockingQueue<Event> eventQueue = new LinkedBlockingQueue<>();
+  private TonyConfigurationKeys.DistributedMode distributedMode;
 
   // Container info
   private int amRetryCount;
@@ -282,6 +284,9 @@ public class ApplicationMaster {
         TonyConfigurationKeys.DEFAULT_TASK_MAX_MISSED_HEARTBEATS);
     tonyHistoryFolder = tonyConf.get(TonyConfigurationKeys.TONY_HISTORY_LOCATION,
                                      TonyConfigurationKeys.DEFAULT_TONY_HISTORY_LOCATION);
+    String distributedModeVal = tonyConf.get(TonyConfigurationKeys.APPLICATION_DISTRIBUTED_MODE,
+            DEFAULT_APPLICATION_DISTRIBUTED_MODE);
+    distributedMode = TonyConfigurationKeys.DistributedMode.valueOf(distributedModeVal.toUpperCase());
 
     try {
       historyFs = new Path(tonyHistoryFolder).getFileSystem(hdfsConf);
@@ -938,38 +943,54 @@ public class ApplicationMaster {
       }
 
       metricsReporter.addTask(task);
-      // Return null until all tasks have registered
-      int totalTasks = session.getTotalTasks();
-      if (registeredTasks.size() == totalTasks) {
-        LOG.info("All " + totalTasks + " tasks registered.");
-        return getClusterSpec();
-      } else {
-        // Periodically print a list of all tasks we are still awaiting registration from.
-        if (System.currentTimeMillis() - lastRegisterWorkerTime > REGISTRATION_STATUS_INTERVAL_MS) {
-          Set<TonyTask> unregisteredTasks = getUnregisteredTasks();
-          LOG.info(String.format("Received registrations from %d tasks, awaiting registration from %d tasks.",
-              registeredTasks.size(), totalTasks - registeredTasks.size()));
-          unregisteredTasks.forEach(t -> {
-            // Stop application when timeout
-            if (System.currentTimeMillis() - t.getStartTime() > registrationTimeoutMs) {
-              String errorMsg = String.format("Stopping AM for task [%s:%s] registration timeout: "
-                              + "allocated container is %s on host %s",
-                  t.getJobName(), t.getTaskIndex(),
-                  (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
-                  (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none"));
-              LOG.error(errorMsg);
-              session.setFinalStatus(FinalApplicationStatus.FAILED, errorMsg);
-              stop();
-            } else {
-                LOG.info(String.format("Awaiting registration from task %s %s in %s on host %s",
+
+      // two distributed mode(default is cluster) cases:
+      // 1. when in independent-task mode, task will be allowed to run when AM accept worker register spec,
+      // 2. when in cluster mode, it will start until all tasks have registered.
+      switch (distributedMode) {
+        case CLUSTER:
+          int totalTasks = session.getTotalTasks();
+          if (registeredTasks.size() == totalTasks) {
+            LOG.info("All " + totalTasks + " tasks registered.");
+            return getClusterSpec();
+          } else {
+            printTasksPeriodically();
+            return null;
+          }
+        // return the current task spec directly.
+        case INDEPENDENT_TASK:
+          return spec;
+        default:
+          throw new IOException("Errors on registering to TonY AM, because of unknown distributed mode: "
+                  + distributedMode);
+      }
+    }
+
+    private void printTasksPeriodically() {
+      // Periodically print a list of all tasks we are still awaiting registration from.
+      if (System.currentTimeMillis() - lastRegisterWorkerTime > REGISTRATION_STATUS_INTERVAL_MS) {
+        Set<TonyTask> unregisteredTasks = getUnregisteredTasks();
+        LOG.info(String.format("Received registrations from %d tasks, awaiting registration from %d tasks.",
+                registeredTasks.size(), session.getTotalTasks() - registeredTasks.size()));
+        unregisteredTasks.forEach(t -> {
+          // Stop application when timeout
+          if (System.currentTimeMillis() - t.getStartTime() > registrationTimeoutMs) {
+            String errorMsg = String.format("Stopping AM for task [%s:%s] registration timeout: "
+                            + "allocated container is %s on host %s",
+                    t.getJobName(), t.getTaskIndex(),
+                    (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
+                    (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none"));
+            LOG.error(errorMsg);
+            session.setFinalStatus(FinalApplicationStatus.FAILED, errorMsg);
+            stop();
+          } else {
+            LOG.info(String.format("Awaiting registration from task %s %s in %s on host %s",
                     t.getJobName(), t.getTaskIndex(),
                     (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
                     (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none")));
-            }
-          });
-          lastRegisterWorkerTime = System.currentTimeMillis();
-        }
-        return null;
+          }
+        });
+        lastRegisterWorkerTime = System.currentTimeMillis();
       }
     }
 
@@ -1209,6 +1230,8 @@ public class ApplicationMaster {
       containerLaunchEnv.put(Constants.JOB_NAME, jobName);
       containerLaunchEnv.put(Constants.TASK_INDEX, taskIndex);
       containerLaunchEnv.put(Constants.TASK_NUM, String.valueOf(session.getTotalTrackedTasks()));
+      containerLaunchEnv.put(Constants.DISTRUBUTED_MODE_NAME, distributedMode.name());
+
       if (session.isChief(jobName, taskIndex)) {
         containerLaunchEnv.put(Constants.IS_CHIEF, Boolean.TRUE.toString());
       }

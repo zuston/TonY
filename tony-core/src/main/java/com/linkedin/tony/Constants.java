@@ -170,5 +170,8 @@ public class Constants {
   public static final String TONY_SUBMIT_TYPE = "TONY_SUBMIT_TYPE";
   public static final String GEAR_WORKFLOW_ID_KEY = "gear.workflow.id";
 
+  // Distributed Mode
+  public static final String DISTRUBUTED_MODE_NAME = "DISTRIBUTED_MODE";
+
   private Constants() { }
 }
