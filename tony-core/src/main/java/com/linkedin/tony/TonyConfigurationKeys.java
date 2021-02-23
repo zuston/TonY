@@ -17,8 +17,8 @@ public class TonyConfigurationKeys {
   }
 
   public enum DistributedMode {
-    CLUSTER,
-    INDEPENDENT_TASK
+    GANG,
+    FCFS
   }
 
   private TonyConfigurationKeys() {
@@ -128,7 +128,7 @@ public class TonyConfigurationKeys {
   public static final String APPLICATION_TF_EVENT_OUTPUT = TONY_APPLICATION_PREFIX + "tf.event.output.path";
 
   public static final String APPLICATION_DISTRIBUTED_MODE = TONY_APPLICATION_PREFIX + "distributed-mode";
-  public static final String DEFAULT_APPLICATION_DISTRIBUTED_MODE = DistributedMode.CLUSTER.name();
+  public static final String DEFAULT_APPLICATION_DISTRIBUTED_MODE = DistributedMode.GANG.name();
 
   // unit: millis seconds
   public static final String APPLICATION_TF_EVENT_COLLECT_INTERVAL =
