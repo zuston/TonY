@@ -435,6 +435,9 @@ public class Utils {
     try {
       Map<String, List<String>> spec =
               mapper.readValue(clusterSpec, new TypeReference<Map<String, List<String>>>() { });
+
+      spec.keySet().removeIf(Utils::isTFEvaluator);
+
       TFConfig tfConfig = new TFConfig(spec, jobName, taskIndex);
       return mapper.writeValueAsString(tfConfig);
     } catch (IOException ioe) {
@@ -675,6 +678,10 @@ public class Utils {
       }
     }
     return containerEnv;
+  }
+
+  private static boolean isTFEvaluator(String jobName) {
+    return Constants.EVALUATOR_JOB_NAME.equals(jobName.toLowerCase());
   }
 
   private Utils() { }
