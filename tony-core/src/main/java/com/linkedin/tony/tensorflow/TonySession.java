@@ -8,9 +8,11 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.logging.Log;
@@ -62,6 +64,8 @@ public class TonySession {
   // go straight to the cleaning phase.
   private boolean trainingFinished = false;
 
+  private Set<String> registeredTasks = new HashSet<>();
+
   public enum TaskType {
     TASK_TYPE_CHIEF, TASK_TYPE_PARAMETER_SERVER, TASK_TYPE_OTHERS
   }
@@ -96,7 +100,6 @@ public class TonySession {
   public Map<String, TonyTask[]> getTonyTasks() {
     return this.jobTasks;
   }
-
 
   public boolean isTrainingFinished() {
     return trainingFinished;
@@ -553,5 +556,21 @@ public class TonySession {
     } catch (Exception e) {
       return null;
     }
+  }
+
+  public void addRegisteredTask(String taskId) {
+    registeredTasks.add(taskId);
+  }
+
+  public void resetRegisteredTasks() {
+    registeredTasks = new HashSet<>();
+  }
+
+  public int getNumRegisteredTasks() {
+    return registeredTasks.size();
+  }
+
+  public Set<String> getRegisteredTasks() {
+    return registeredTasks;
   }
 }
