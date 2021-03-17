@@ -31,9 +31,9 @@ public final class OpalUtils {
             postMethod.addRequestHeader("Content-Type", "application/json;charset=utf-8");
             int statusCode = client.executeMethod(postMethod);
             postMethod.getResponseBodyAsStream();
-            LOG.info("request to " + url + ", statusCode=" + statusCode);
+            LOG.debug("request to " + url + ", statusCode=" + statusCode);
         } catch (Exception e) {
-            LOG.warn("Error request to " + url, e);
+            LOG.error("Error request to " + url, e);
             return false;
         } finally {
             if (postMethod != null) {
