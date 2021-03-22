@@ -9,6 +9,8 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -29,6 +31,7 @@ import org.apache.hadoop.yarn.api.records.LocalResourceType;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 
 import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.linkedin.tony.Constants;
 import com.linkedin.tony.TonyClient;
 import com.linkedin.tony.TonyConfigurationKeys;
@@ -42,6 +45,7 @@ import static com.linkedin.tony.Constants.HADOOP_CONF_DIR;
 import static com.linkedin.tony.Constants.HDFS_SITE_CONF;
 import static com.linkedin.tony.Constants.TONY_FOLDER;
 import static com.linkedin.tony.Constants.TONY_JAR_NAME;
+import static com.linkedin.tony.TonyConfigurationKeys.FRAMEWORK_NAME;
 
 /**
  * ClusterSubmitter is used to submit a distributed Tony
@@ -55,26 +59,36 @@ import static com.linkedin.tony.Constants.TONY_JAR_NAME;
  */
 public class ClusterSubmitter extends TonySubmitter {
   private static final Log LOG = LogFactory.getLog(ClusterSubmitter.class);
+
   private static final String OPAL_URL = "http://opal-prod.online.qiyi.qae/api/v1";
   private static final String OPAL_TEST_URL = "http://opal-test.online.qiyi.qae/api/v1";
   private static final String OPAL_TOKEN = "78a6841d97b4451d89f3822a3c403734";
   private static final String GEAR_URL = "http://gear.cloud.qiyi.domain";
   private static final String TONY_OPAL_TEST = "tony.opal.test";
+  private static final String TONY_OPAL_EXTRA_INFO_KEY = "tony.opal.extra.info.json";
+
   private static String diagnostics;
   private static class AppRegisterHandler implements CallbackHandler {
 
     @Override
     public void onApplicationIdReceived(final ApplicationSubmissionContext appContext) {
-        LOG.info("Registering to gear");
-      registerToGear(appContext.getApplicationId());
+      try {
+        LOG.info("Registering to Gear");
+        registerToGear(appContext.getApplicationId());
         LOG.info("Registering to Opal");
-
-      registerToOpal(appContext);
+        registerToOpal(appContext);
+      } catch (Exception e) {
+        LOG.error("Errors on registering to Gear/Opal.", e);
+      }
     }
 
     @Override
     public void afterApplicationSubmitted(ApplicationId appId, Set<TaskInfo> taskInfoSet) {
-      updateTaskInfoToOpal(appId, taskInfoSet);
+      try {
+        updateTaskInfoToOpal(appId, taskInfoSet);
+      } catch (Exception e) {
+        LOG.error("Errors on updating application info to Opal.", e);
+      }
     }
 
     @Override
@@ -89,13 +103,23 @@ public class ClusterSubmitter extends TonySubmitter {
       try {
         String url = getOpalEnvUrl() + "/tfjob/update/log?&appId=" + appId;
         url += "&token=" + OPAL_TOKEN;
-        OpalUtils.httpPost(url, params);
+        OpalUtils.retryHttpPost(url, params);
       } catch (Exception e) {
         LOG.error("Failed to update task log info to opal", e);
       }
     }
 
     private void registerToOpal(ApplicationSubmissionContext appContext) {
+      String opalExtraInfoJson = client.getTonyConf().get(TONY_OPAL_EXTRA_INFO_KEY);
+
+      Map<String, String> registerInfoMap = new HashMap<>();
+      Gson gson = new Gson();
+      if (StringUtils.isNotEmpty(opalExtraInfoJson)) {
+        Map<String, String> opalInfo =
+                gson.fromJson(opalExtraInfoJson, new TypeToken<Map<String, String>>() { }.getType());
+        registerInfoMap.putAll(opalInfo);
+      }
+
       String appId = appContext.getApplicationId().toString();
       String appName = appContext.getApplicationName();
       String queue = appContext.getQueue();
@@ -105,48 +129,69 @@ public class ClusterSubmitter extends TonySubmitter {
       } catch (IOException e) {
         LOG.error("Failed to get app user", e);
       }
+
       String origin = "unknown";
       String opalUrl = getOpalEnvUrl();
-      String url = opalUrl + "/tfjob/register?appId=" + appId + "&appName=" + appName + "&queue=" + queue + "&user=" + user;
+      String url = opalUrl + "/tfjob/register/v2?" + "&token=" + OPAL_TOKEN;
+
+      String tbUrl = null;
       try {
-          url += "&tensorboardUrl=" + URLEncoder.encode(client.getTensorboardProxyUrl(), "UTF-8");
+          tbUrl = URLEncoder.encode(client.getTensorboardProxyUrl(), "UTF-8");
       } catch (Exception e) {
-          LOG.error("The tensorflow uri encode fail, url is " + client.getTensorboardProxyUrl());
+          LOG.error("The tensorboard uri encode fail, url is " + client.getTensorboardProxyUrl());
       }
-      String gearId = null;
-      String cluster = hdfsConf.get("fs.defaultFS").split("://", 2)[1];;
-      url += "&cluster=" + cluster;
+
+      String wfId = null;
+      String cluster = hdfsConf.get("fs.defaultFS").split("://", 2)[1];
       String gearCluster = null;
       String gearActionName = null;
 
       if (fromGear()) {
         origin = "gear";
         String workflowActionId = System.getenv("GEAR_WORKFLOW_ACTION_ID");
-        gearId = workflowActionId.split("@")[0];
+        wfId = workflowActionId.split("@")[0];
         gearActionName = workflowActionId.split("@")[1];
         gearCluster = System.getenv("GEAR_CLUSTER");
       }
 
-      url += "&origin=" + origin;
-      url += gearId == null ? "" : "&gearWorkflowId=" + gearId;
-      url += gearCluster == null ? "" : "&gearCluster=" + gearCluster;
-      url += gearActionName == null ? "" : "&gearActionName=" + gearActionName;
+      String jobType = client.getTonyConf().get(FRAMEWORK_NAME, "tensorflow");
 
-      url += "&token=" + OPAL_TOKEN;
-      LOG.info("Registering to Opal, url is " + url);
-      OpalUtils.httpPost(url, client.getTonyUserConfStr());
+      registerInfoMap.put("appId", appId);
+      registerInfoMap.put("appName", appName);
+      registerInfoMap.put("queue", queue);
+      registerInfoMap.put("user", user);
+      registerInfoMap.put("origin", origin);
+      if (tbUrl != null) {
+        registerInfoMap.put("tensorboardUrl", tbUrl);
+      }
+      registerInfoMap.put("runningCluster", cluster);
+      if (gearCluster != null) {
+        registerInfoMap.put("gearCluster", gearCluster);
+      }
+      if (gearActionName != null) {
+        registerInfoMap.put("gearActionName", gearActionName);
+      }
+      if (wfId != null) {
+        registerInfoMap.put("wfId", wfId);
+      }
+      registerInfoMap.put("tonyConf", client.getTonyUserConfStr());
+      registerInfoMap.put("jobType", jobType);
+
+      String registerInfoJson = gson.toJson(registerInfoMap);
+      LOG.info("First time registering to Opal, url: " + url + ", info json: " + registerInfoJson);
+      OpalUtils.retryHttpPost(url, registerInfoJson);
     }
 
-      private static String getOpalEnvUrl() {
+    private static String getOpalEnvUrl() {
         String opalUrl = OPAL_URL;
         LOG.info("The value is " + client.getTonyConf().get("tony.application.name"));
           if (client.getTonyConf().getBoolean(TONY_OPAL_TEST, false)) {
               opalUrl = OPAL_TEST_URL;
           }
           return opalUrl;
-      }
+    }
 
-      private boolean fromGear() {
+    private boolean fromGear() {
       if (System.getenv("GEAR_WORKFLOW_ACTION_ID") != null) {
         return true;
       }
@@ -190,19 +235,18 @@ public class ClusterSubmitter extends TonySubmitter {
         }
       }
     }
-
   }
 
-    private void pushStatus2Opal(String status) {
+    private void reportFinalStatus2Opal(String status) {
       String appId = client.getAppId().toString();
       String updateStatusUrl = AppRegisterHandler.getOpalEnvUrl() + "/tfjob/update/status?status=" + status + "&appId=" + appId;
       updateStatusUrl += "&token=" + OPAL_TOKEN;
-      OpalUtils.httpPost(updateStatusUrl, null);
+      OpalUtils.retryHttpPost(updateStatusUrl, null);
     }
 
-    private void pushStatus2Opal(int exitCode) {
+    private void reportFinalStatus2Opal(int exitCode) {
         String status = exitCode == 0 ? "SUCCEEDED" : "FAILED";
-        pushStatus2Opal(status);
+        reportFinalStatus2Opal(status);
     }
 
   private static Configuration hdfsConf;
@@ -227,7 +271,7 @@ public class ClusterSubmitter extends TonySubmitter {
   public int submit(String[] args) throws ParseException, URISyntaxException {
     LOG.info("Starting ClusterSubmitter..");
     String jarLocation = new File(ClusterSubmitter.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getPath();
-    int exitCode;
+    int exitCode = -1;
     Path cachedLibPath = null;
     try (FileSystem fs = FileSystem.get(hdfsConf)) {
       cachedLibPath = new Path(fs.getHomeDirectory(), TONY_FOLDER + Path.SEPARATOR + UUID.randomUUID().toString());
@@ -243,17 +287,15 @@ public class ClusterSubmitter extends TonySubmitter {
       Runtime.getRuntime().addShutdownHook(new Thread(() -> {
         try {
           client.forceKillApplication();
-//          pushStatus2Opal("KILLED");
         } catch (YarnException | IOException e) {
           LOG.error("Failed to kill application during shutdown.", e);
         }
       }));
       exitCode = client.start();
-      pushStatus2Opal(exitCode);
     } catch (IOException e) {
       LOG.fatal("Failed to create FileSystem: ", e);
-      exitCode = -1;
     } finally {
+      reportFinalStatus2Opal(exitCode);
       Utils.cleanupHDFSPath(hdfsConf, cachedLibPath);
     }
     return exitCode;

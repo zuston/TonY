@@ -4,6 +4,8 @@
  */
 package com.linkedin.tony.util;
 
+import java.io.IOException;
+
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.logging.Log;
@@ -16,11 +18,14 @@ import org.apache.commons.logging.LogFactory;
 public final class OpalUtils {
     private static final Log LOG = LogFactory.getLog(OpalUtils.class);
 
+    private static final int RETRY_MAX_TIME = 3;
+
     private OpalUtils() {
         // ignore
     }
 
-    public static boolean httpPost(String url, String body) {
+    public static boolean basicHttpPost(String url, String body) throws IOException {
+        boolean isSuccess = false;
         PostMethod postMethod = null;
         try {
             HttpClient client = new HttpClient();
@@ -32,14 +37,39 @@ public final class OpalUtils {
             int statusCode = client.executeMethod(postMethod);
             postMethod.getResponseBodyAsStream();
             LOG.debug("request to " + url + ", statusCode=" + statusCode);
+
+            if (statusCode == 200) {
+                isSuccess = true;
+            }
         } catch (Exception e) {
-            LOG.error("Error request to " + url, e);
-            return false;
+            LOG.error("Error request: " + url, e);
+            throw e;
         } finally {
             if (postMethod != null) {
                 postMethod.releaseConnection();
             }
         }
-        return true;
+        return isSuccess;
+    }
+
+    public static boolean httpPost(String url, String body) {
+        try {
+            return basicHttpPost(url, body);
+        } catch (Exception e) {
+            LOG.error("Errors on post to url: " + url + ", body: " + body, e);
+        }
+        return false;
+    }
+
+    public static boolean retryHttpPost(String url, String body) {
+        int i = 0;
+        while (i < RETRY_MAX_TIME) {
+            try {
+                return basicHttpPost(url, body);
+            } catch (IOException e) {
+                i++;
+            }
+        }
+        return false;
     }
 }
