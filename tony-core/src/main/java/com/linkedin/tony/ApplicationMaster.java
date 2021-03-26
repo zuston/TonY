@@ -204,8 +204,11 @@ public class ApplicationMaster {
    */
   private final ExecutorService pluginExecutorsThreadPool = Executors.newCachedThreadPool();
 
-  private long registrationTimeoutMs = tonyConf.getInt(TonyConfigurationKeys.CONTAINER_ALLOCATION_TIMEOUT,
-          TonyConfigurationKeys.DEFAULT_CONTAINER_ALLOCATION_TIMEOUT);
+  /** Container registration timeout time **/
+  private long registrationTimeoutMs;
+
+  /** AM waiting timeout of client signal stop **/
+  private int waitingClientSignalStopTimeout;
 
   private ApplicationMaster() {
     hdfsConf = new Configuration(false);
@@ -290,6 +293,12 @@ public class ApplicationMaster {
     String distributedModeVal = tonyConf.get(TonyConfigurationKeys.APPLICATION_DISTRIBUTED_MODE,
             DEFAULT_APPLICATION_DISTRIBUTED_MODE);
     distributedMode = TonyConfigurationKeys.DistributedMode.valueOf(distributedModeVal.toUpperCase());
+
+    registrationTimeoutMs = tonyConf.getInt(TonyConfigurationKeys.CONTAINER_ALLOCATION_TIMEOUT,
+            TonyConfigurationKeys.DEFAULT_CONTAINER_ALLOCATION_TIMEOUT);
+
+    waitingClientSignalStopTimeout = tonyConf.getInt(TonyConfigurationKeys.AM_WAIT_CLIENT_STOP_TIMEOUT,
+            TonyConfigurationKeys.DEFAULT_AM_WAIT_CLIENT_STOP_TIMEOUT);
 
     try {
       historyFs = new Path(tonyHistoryFolder).getFileSystem(hdfsConf);
@@ -839,7 +848,7 @@ public class ApplicationMaster {
     nmClientAsync.stop();
     amRMClient.stop();
     // Poll until TonyClient signals we should exit
-    boolean result = Utils.poll(() -> clientSignalToStop, 1, 15);
+    boolean result = Utils.poll(() -> clientSignalToStop, 1, waitingClientSignalStopTimeout);
     if (!result) {
       LOG.warn("TonyClient didn't signal Tony AM to stop.");
     }
