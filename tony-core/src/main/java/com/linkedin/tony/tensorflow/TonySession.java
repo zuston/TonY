@@ -257,7 +257,7 @@ public class TonySession {
   /**
    * Refresh task status when a TaskExecutor registers its exit code with AM.
    */
-  public void onTaskCompleted(String jobName, String jobIndex, int exitCode) {
+  public void onTaskCompleted(String jobName, String jobIndex, int exitCode, String taskDiagnosticMsg) {
     LOG.info(String.format("Job %s:%s exited with %d", jobName, jobIndex, exitCode));
     TonyTask task = getTask(jobName, jobIndex);
     Preconditions.checkNotNull(task);
@@ -272,22 +272,12 @@ public class TonySession {
       if (isChief(jobName, jobIndex) || shouldStopOnFailure(jobName)) {
         trainingFinished = true;
       }
-      String errorMsg = getErrMsg(jobName, jobIndex, exitCode);
-      setFinalStatus(FinalApplicationStatus.FAILED, "Exit status: " + exitCode + ", " + errorMsg);
+      String diagnostic = "Exit status: " + exitCode;
+      if (taskDiagnosticMsg != null) {
+        diagnostic += ". Error msg: " + taskDiagnosticMsg;
+      }
+      setFinalStatus(FinalApplicationStatus.FAILED, diagnostic);
     }
-  }
-
-  private String getErrMsg(String jobName, String jobIndex, int exitCode) {
-    String msg = String.format("Task [%s:%s] ", jobName, jobIndex);
-    switch (exitCode) {
-      case ContainerExitStatus.KILLED_EXCEEDED_PMEM:
-        msg += "killed due to out of memory.";
-        break;
-      default:
-        msg += "exits with non-zero status.";
-        break;
-    }
-    return msg;
   }
 
   /**

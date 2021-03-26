@@ -1136,7 +1136,7 @@ public class ApplicationMaster {
   class NMCallbackHandler implements NMClientAsync.CallbackHandler {
     @Override
     public void onContainerStopped(ContainerId containerId) {
-      processFinishedContainer(containerId, ContainerExitStatus.KILLED_BY_APPMASTER);
+      processFinishedContainer(containerId, ContainerExitStatus.KILLED_BY_APPMASTER, "KILLED_BY_APPMASTER");
     }
 
     @Override
@@ -1183,7 +1183,7 @@ public class ApplicationMaster {
           LOG.info(diagnostics);
         }
 
-        processFinishedContainer(containerStatus.getContainerId(), exitStatus);
+        processFinishedContainer(containerStatus.getContainerId(), exitStatus, diagnostics);
       }
     }
 
@@ -1340,7 +1340,7 @@ public class ApplicationMaster {
     mainThread.interrupt();
   }
 
-  private void processFinishedContainer(ContainerId containerId, int exitStatus) {
+  private void processFinishedContainer(ContainerId containerId, int exitStatus, String diagnosticMessage) {
     TonyTask task = session.getTask(containerId);
     if (task != null) {
       // Ignore tasks from past sessions.
@@ -1350,7 +1350,7 @@ public class ApplicationMaster {
 
       LOG.info("Container " + containerId + " for task " + task + " finished with exitStatus " + exitStatus + ".");
       metricsReporter.deleteTask(task);
-      session.onTaskCompleted(task.getJobName(), task.getTaskIndex(), exitStatus);
+      session.onTaskCompleted(task.getJobName(), task.getTaskIndex(), exitStatus, diagnosticMessage);
       eventHandler.emitEvent(new Event(EventType.TASK_FINISHED,
           new TaskFinished(task.getJobName(), Integer.parseInt(task.getTaskIndex()),
               task.getTaskInfo().getStatus().toString(),
