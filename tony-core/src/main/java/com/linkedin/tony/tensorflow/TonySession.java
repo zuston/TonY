@@ -8,9 +8,11 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.logging.Log;
@@ -62,6 +64,8 @@ public class TonySession {
   // go straight to the cleaning phase.
   private boolean trainingFinished = false;
 
+  private Set<String> registeredTasks = new HashSet<>();
+
   public enum TaskType {
     TASK_TYPE_CHIEF, TASK_TYPE_PARAMETER_SERVER, TASK_TYPE_OTHERS
   }
@@ -96,7 +100,6 @@ public class TonySession {
   public Map<String, TonyTask[]> getTonyTasks() {
     return this.jobTasks;
   }
-
 
   public boolean isTrainingFinished() {
     return trainingFinished;
@@ -254,7 +257,7 @@ public class TonySession {
   /**
    * Refresh task status when a TaskExecutor registers its exit code with AM.
    */
-  public void onTaskCompleted(String jobName, String jobIndex, int exitCode) {
+  public void onTaskCompleted(String jobName, String jobIndex, int exitCode, String taskDiagnosticMsg) {
     LOG.info(String.format("Job %s:%s exited with %d", jobName, jobIndex, exitCode));
     TonyTask task = getTask(jobName, jobIndex);
     Preconditions.checkNotNull(task);
@@ -269,22 +272,12 @@ public class TonySession {
       if (isChief(jobName, jobIndex) || shouldStopOnFailure(jobName)) {
         trainingFinished = true;
       }
-      String errorMsg = getErrMsg(jobName, jobIndex, exitCode);
-      setFinalStatus(FinalApplicationStatus.FAILED, "Exit status: " + exitCode + ", " + errorMsg);
+      String diagnostic = "Exit status: " + exitCode;
+      if (taskDiagnosticMsg != null) {
+        diagnostic += ". Error msg: " + taskDiagnosticMsg;
+      }
+      setFinalStatus(FinalApplicationStatus.FAILED, diagnostic);
     }
-  }
-
-  private String getErrMsg(String jobName, String jobIndex, int exitCode) {
-    String msg = String.format("Task [%s:%s] ", jobName, jobIndex);
-    switch (exitCode) {
-      case ContainerExitStatus.KILLED_EXCEEDED_PMEM:
-        msg += "killed due to out of memory.";
-        break;
-      default:
-        msg += "exits with non-zero status.";
-        break;
-    }
-    return msg;
   }
 
   /**
@@ -553,5 +546,21 @@ public class TonySession {
     } catch (Exception e) {
       return null;
     }
+  }
+
+  public void addRegisteredTask(String taskId) {
+    registeredTasks.add(taskId);
+  }
+
+  public void resetRegisteredTasks() {
+    registeredTasks = new HashSet<>();
+  }
+
+  public int getNumRegisteredTasks() {
+    return registeredTasks.size();
+  }
+
+  public Set<String> getRegisteredTasks() {
+    return registeredTasks;
   }
 }

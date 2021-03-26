@@ -204,6 +204,12 @@ public class ApplicationMaster {
    */
   private final ExecutorService pluginExecutorsThreadPool = Executors.newCachedThreadPool();
 
+  /** Container registration timeout time **/
+  private long registrationTimeoutMs;
+
+  /** AM waiting timeout of client signal stop **/
+  private int waitingClientSignalStopTimeout;
+
   private ApplicationMaster() {
     hdfsConf = new Configuration(false);
     yarnConf = new Configuration(false);
@@ -287,6 +293,12 @@ public class ApplicationMaster {
     String distributedModeVal = tonyConf.get(TonyConfigurationKeys.APPLICATION_DISTRIBUTED_MODE,
             DEFAULT_APPLICATION_DISTRIBUTED_MODE);
     distributedMode = TonyConfigurationKeys.DistributedMode.valueOf(distributedModeVal.toUpperCase());
+
+    registrationTimeoutMs = tonyConf.getInt(TonyConfigurationKeys.CONTAINER_ALLOCATION_TIMEOUT,
+            TonyConfigurationKeys.DEFAULT_CONTAINER_ALLOCATION_TIMEOUT);
+
+    waitingClientSignalStopTimeout = tonyConf.getInt(TonyConfigurationKeys.AM_WAIT_CLIENT_STOP_TIMEOUT,
+            TonyConfigurationKeys.DEFAULT_AM_WAIT_CLIENT_STOP_TIMEOUT);
 
     try {
       historyFs = new Path(tonyHistoryFolder).getFileSystem(hdfsConf);
@@ -700,6 +712,18 @@ public class ApplicationMaster {
         break;
       }
 
+      // Handle executor registered time out
+      if (registrationTimeout()) {
+        LOG.error("Application failed due to registered executor task timeout");
+        break;
+      }
+
+      // Handle executor exit when launching task executor process
+      if (startupFailed()) {
+        LOG.error("Application failed due to started executor failed.");
+        break;
+      }
+
       int numTotalTrackedTasks = session.getTotalTrackedTasks();
       if (numTotalTrackedTasks > 0) {
         int numCompletedTrackedTasks = session.getNumCompletedTrackedTasks();
@@ -749,12 +773,63 @@ public class ApplicationMaster {
     return status == FinalApplicationStatus.SUCCEEDED;
   }
 
+  private boolean startupFailed() {
+    Set<TonyTask> completedFailedTasks = getCompletedFailedTasks();
+    LOG.debug("Completed failed task size: " + completedFailedTasks.size());
+
+    // When executor failed and not registering to AM, it means task failed when starting task executor process
+    return completedFailedTasks.stream().anyMatch(t -> {
+      String taskId = t.getTaskInfo().getName() + ":" + t.getTaskInfo().getIndex();
+      LOG.debug("Failed task ID: " + taskId);
+      boolean existFailed = !session.getRegisteredTasks().contains(t);
+      if (existFailed) {
+        String errorMsg = String.format("Stopping AM for task [%s:%s] starting failed, "
+                        + "allocated container is %s on host %s",
+                t.getJobName(), t.getTaskIndex(),
+                (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
+                (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none"));
+        LOG.error(errorMsg);
+        session.setFinalStatus(FinalApplicationStatus.FAILED, errorMsg);
+        stop();
+      }
+      return existFailed;
+    });
+  }
+
+  private boolean registrationTimeout() {
+    Set<TonyTask> unregisteredTasks = getUnregisteredTasks();
+    for (TonyTask t : unregisteredTasks) {
+      if (registrationTimeoutMs <= 0 || System.currentTimeMillis() - t.getStartTime() <= registrationTimeoutMs) {
+        continue;
+      }
+
+      // If registration time out, need to stop all containers. And set the app failed
+      String errorMsg = String.format("Stopping AM for task [%s:%s] registration timeout: "
+                      + "allocated container is %s on host %s",
+              t.getJobName(), t.getTaskIndex(),
+              (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
+              (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none"));
+      LOG.error(errorMsg);
+      session.setFinalStatus(FinalApplicationStatus.FAILED, errorMsg);
+      stop();
+      return true;
+    }
+
+    return false;
+  }
+
   /**
    * Returns the tasks whose containers have launched but not called {@link ApplicationRpc#registerWorkerSpec} yet.
    */
   private Set<TonyTask> getUnregisteredTasks() {
     return session.getTonyTasks().values().stream().flatMap(Arrays::stream)
         .filter(task -> task != null && task.getHost() == null)
+        .collect(Collectors.toSet());
+  }
+
+  private Set<TonyTask> getCompletedFailedTasks() {
+    return session.getTonyTasks().values().stream().flatMap(Arrays::stream)
+        .filter(task -> task != null && task.isFailed())
         .collect(Collectors.toSet());
   }
 
@@ -773,7 +848,7 @@ public class ApplicationMaster {
     nmClientAsync.stop();
     amRMClient.stop();
     // Poll until TonyClient signals we should exit
-    boolean result = Utils.poll(() -> clientSignalToStop, 1, 15);
+    boolean result = Utils.poll(() -> clientSignalToStop, 1, waitingClientSignalStopTimeout);
     if (!result) {
       LOG.warn("TonyClient didn't signal Tony AM to stop.");
     }
@@ -877,15 +952,11 @@ public class ApplicationMaster {
   private final class RpcForClient implements ApplicationRpc {
     private static final long REGISTRATION_STATUS_INTERVAL_MS = 15 * 1000;
 
-    private long registrationTimeoutMs = tonyConf.getInt(TonyConfigurationKeys.CONTAINER_ALLOCATION_TIMEOUT,
-            TonyConfigurationKeys.DEFAULT_CONTAINER_ALLOCATION_TIMEOUT);
-
-    private Set<String> registeredTasks = new HashSet<>();
     private long lastRegisterWorkerTime = System.currentTimeMillis();
 
     @Override
     public void reset() {
-      registeredTasks =  new HashSet<>();
+      session.resetRegisteredTasks();
     }
 
     @Override
@@ -932,7 +1003,7 @@ public class ApplicationMaster {
       if (task.getHost() == null) {
         LOG.info("Received cluster spec registration request from task " + taskId + " with spec: " + spec);
         task.setHostPort(spec);
-        registeredTasks.add(taskId);
+        session.addRegisteredTask(taskId);
 
         // HB Registration should happen only after worker registration..
         // The Task registration timeout will take care of rescheduling the task
@@ -950,7 +1021,7 @@ public class ApplicationMaster {
       switch (distributedMode) {
         case GANG:
           int totalTasks = session.getTotalTasks();
-          if (registeredTasks.size() == totalTasks) {
+          if (session.getNumRegisteredTasks() == totalTasks) {
             LOG.info("All " + totalTasks + " tasks registered.");
             return getClusterSpec();
           } else {
@@ -970,26 +1041,18 @@ public class ApplicationMaster {
       // Periodically print a list of all tasks we are still awaiting registration from.
       if (System.currentTimeMillis() - lastRegisterWorkerTime > REGISTRATION_STATUS_INTERVAL_MS) {
         Set<TonyTask> unregisteredTasks = getUnregisteredTasks();
+
+        int registeredTasksNum = session.getNumRegisteredTasks();
         LOG.info(String.format("Received registrations from %d tasks, awaiting registration from %d tasks.",
-                registeredTasks.size(), session.getTotalTasks() - registeredTasks.size()));
-        unregisteredTasks.forEach(t -> {
-          // Stop application when timeout
-          if (System.currentTimeMillis() - t.getStartTime() > registrationTimeoutMs) {
-            String errorMsg = String.format("Stopping AM for task [%s:%s] registration timeout: "
-                            + "allocated container is %s on host %s",
-                    t.getJobName(), t.getTaskIndex(),
-                    (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
-                    (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none"));
-            LOG.error(errorMsg);
-            session.setFinalStatus(FinalApplicationStatus.FAILED, errorMsg);
-            stop();
-          } else {
-            LOG.info(String.format("Awaiting registration from task %s %s in %s on host %s",
-                    t.getJobName(), t.getTaskIndex(),
-                    (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
-                    (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none")));
-          }
-        });
+                registeredTasksNum, session.getTotalTasks() - registeredTasksNum));
+
+        unregisteredTasks.forEach(t -> LOG.info(
+                String.format("Awaiting registration from task %s %s in %s on host %s",
+                        t.getJobName(), t.getTaskIndex(),
+                        (t.getContainer() != null ? t.getContainer().getId().toString() : "none"),
+                        (t.getContainer() != null ? t.getContainer().getNodeId().getHost() : "none")))
+        );
+
         lastRegisterWorkerTime = System.currentTimeMillis();
       }
     }
@@ -1082,7 +1145,7 @@ public class ApplicationMaster {
   class NMCallbackHandler implements NMClientAsync.CallbackHandler {
     @Override
     public void onContainerStopped(ContainerId containerId) {
-      processFinishedContainer(containerId, ContainerExitStatus.KILLED_BY_APPMASTER);
+      processFinishedContainer(containerId, ContainerExitStatus.KILLED_BY_APPMASTER, "KILLED_BY_APPMASTER");
     }
 
     @Override
@@ -1129,7 +1192,7 @@ public class ApplicationMaster {
           LOG.info(diagnostics);
         }
 
-        processFinishedContainer(containerStatus.getContainerId(), exitStatus);
+        processFinishedContainer(containerStatus.getContainerId(), exitStatus, diagnostics);
       }
     }
 
@@ -1286,7 +1349,7 @@ public class ApplicationMaster {
     mainThread.interrupt();
   }
 
-  private void processFinishedContainer(ContainerId containerId, int exitStatus) {
+  private void processFinishedContainer(ContainerId containerId, int exitStatus, String diagnosticMessage) {
     TonyTask task = session.getTask(containerId);
     if (task != null) {
       // Ignore tasks from past sessions.
@@ -1296,7 +1359,7 @@ public class ApplicationMaster {
 
       LOG.info("Container " + containerId + " for task " + task + " finished with exitStatus " + exitStatus + ".");
       metricsReporter.deleteTask(task);
-      session.onTaskCompleted(task.getJobName(), task.getTaskIndex(), exitStatus);
+      session.onTaskCompleted(task.getJobName(), task.getTaskIndex(), exitStatus, diagnosticMessage);
       eventHandler.emitEvent(new Event(EventType.TASK_FINISHED,
           new TaskFinished(task.getJobName(), Integer.parseInt(task.getTaskIndex()),
               task.getTaskInfo().getStatus().toString(),

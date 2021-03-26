@@ -170,6 +170,9 @@ public class TonyConfigurationKeys {
   public static final String AM_GPUS = AM_PREFIX + "gpus";
   public static final int DEFAULT_AM_GPUS = 0;
 
+  public static final String AM_WAIT_CLIENT_STOP_TIMEOUT = AM_PREFIX + "wait-client-signal-stop-timeout-sec";
+  public static final int DEFAULT_AM_WAIT_CLIENT_STOP_TIMEOUT = 15;
+
   public static final String AM_PLUGIN_TASKS_ENABLED = AM_PREFIX + "plugin.tasks.enabled";
   public static final boolean DEFAULT_AM_PLUGIN_TASKS_ENABLED = false;
 
