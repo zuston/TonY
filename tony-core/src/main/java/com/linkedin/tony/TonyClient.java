@@ -890,11 +890,7 @@ public class TonyClient implements AutoCloseable {
       }
     }
 
-    if (amRpcClient != null) {
-      amRpcClient.finishApplication();
-      LOG.info("Sent message to AM to stop.");
-      amRpcClient = null;
-    }
+    signalAMToFinish();
 
     if (!result) {
       int maxRetry = 60;
@@ -914,6 +910,18 @@ public class TonyClient implements AutoCloseable {
     }
 
     return result;
+  }
+
+  private void signalAMToFinish() {
+    if (amRpcClient != null) {
+      LOG.info("Sending message to AM to stop.");
+      try {
+        amRpcClient.finishApplication();
+      } catch (Exception e) {
+        LOG.error("Errors on calling AM to finish application. Maybe AM has finished.", e);
+      }
+      amRpcClient = null;
+    }
   }
 
   private void updateTaskInfos() {
