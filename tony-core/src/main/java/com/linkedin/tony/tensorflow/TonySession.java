@@ -182,7 +182,7 @@ public class TonySession {
 
   public int getNumCompletedTasks() {
     return (int) jobTasks.values().stream().flatMap(arr -> Arrays.stream(arr))
-        .filter(task -> task.isCompleted()).count();
+        .filter(task -> task != null && task.isCompleted()).count();
   }
 
   public int getNumCompletedTrackedTasks() {
@@ -204,7 +204,8 @@ public class TonySession {
   }
 
   public int getNumFailedTasks() {
-    return (int) jobTasks.values().stream().flatMap(arr -> Arrays.stream(arr)).filter(task -> task.isFailed()).count();
+    return (int) jobTasks.values().stream().flatMap(arr -> Arrays.stream(arr))
+            .filter(task -> task != null && task.isFailed()).count();
   }
 
   /**
