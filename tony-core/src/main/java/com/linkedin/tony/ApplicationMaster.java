@@ -1242,6 +1242,7 @@ public class ApplicationMaster {
     @Override
     public void onError(Throwable throwable) {
       LOG.error("Received error in AM to RM call", throwable);
+      session.setFinalStatus(FinalApplicationStatus.FAILED, throwable.getMessage());
       stop();
     }
   }
