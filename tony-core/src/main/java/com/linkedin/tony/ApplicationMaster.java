@@ -210,6 +210,10 @@ public class ApplicationMaster {
   /** AM waiting timeout of client signal stop **/
   private int waitingClientSignalStopTimeout;
 
+  /** Framework type, like tensorflow/pytorch/horovod **/
+  private TonyConfigurationKeys.FrameworkType frameworkType;
+  private FrameworkRuntime frameworkRuntime;
+
   private ApplicationMaster() {
     hdfsConf = new Configuration(false);
     yarnConf = new Configuration(false);
@@ -299,6 +303,15 @@ public class ApplicationMaster {
 
     waitingClientSignalStopTimeout = tonyConf.getInt(TonyConfigurationKeys.AM_WAIT_CLIENT_STOP_TIMEOUT,
             TonyConfigurationKeys.DEFAULT_AM_WAIT_CLIENT_STOP_TIMEOUT);
+
+    frameworkType = TonyConfigurationKeys.FrameworkType.valueOf(
+            tonyConf.get(TonyConfigurationKeys.FRAMEWORK_NAME,
+                    TonyConfigurationKeys.DEFAULT_FRAMEWORK_NAME).toUpperCase());
+    frameworkRuntime = FrameworkRuntime.get(frameworkType);
+    if (!frameworkRuntime.validateAndUpdateConfig(tonyConf)) {
+      LOG.error("Invalid TonY conf.");
+      return false;
+    }
 
     try {
       historyFs = new Path(tonyHistoryFolder).getFileSystem(hdfsConf);
@@ -630,6 +643,8 @@ public class ApplicationMaster {
     }
 
     buildTonySession();
+    frameworkRuntime.setTonySession(session);
+
     scheduleTasks();
   }
 
@@ -844,6 +859,8 @@ public class ApplicationMaster {
       LOG.error("Failed to unregister application", e);
     }
 
+    frameworkRuntime.destroy();
+
     redirectServer.stop();
     nmClientAsync.stop();
     amRMClient.stop();
@@ -1015,26 +1032,10 @@ public class ApplicationMaster {
 
       metricsReporter.addTask(task);
 
-      // two distributed mode(default is cluster) cases:
-      // 1. when in independent-task mode, task will be allowed to run when AM accept worker register spec,
-      // 2. when in cluster mode, it will start until all tasks have registered.
-      switch (distributedMode) {
-        case GANG:
-          int totalTasks = session.getTotalTasks();
-          if (session.getNumRegisteredTasks() == totalTasks) {
-            LOG.info("All " + totalTasks + " tasks registered.");
-            return getClusterSpec();
-          } else {
-            printTasksPeriodically();
-            return null;
-          }
-        // return the current task spec directly.
-        case FCFS:
-          return spec;
-        default:
-          throw new IOException("Errors on registering to TonY AM, because of unknown distributed mode: "
-                  + distributedMode);
+      if (frameworkRuntime.canStartTask(distributedMode, taskId)) {
+        return frameworkRuntime.constructClusterSpec(taskId);
       }
+      return null;
     }
 
     private void printTasksPeriodically() {
