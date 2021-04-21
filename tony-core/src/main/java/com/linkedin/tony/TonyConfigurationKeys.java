@@ -13,7 +13,8 @@ public class TonyConfigurationKeys {
   public enum FrameworkType {
     TENSORFLOW,
     PYTORCH,
-    HOROVOD
+    HOROVOD,
+    SINGLE
   }
 
   public enum DistributedMode {

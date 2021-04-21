@@ -20,6 +20,7 @@ import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
 
 import com.linkedin.tony.runtime.PyTorchRuntime;
+import com.linkedin.tony.runtime.SingleRuntime;
 import com.linkedin.tony.runtime.TFRuntime;
 import com.linkedin.tony.tensorflow.TonySession;
 import com.linkedin.tony.util.Utils;
@@ -31,6 +32,8 @@ public interface FrameworkRuntime {
                 return new TFRuntime();
             case PYTORCH:
                 return new PyTorchRuntime();
+            case SINGLE:
+                return new SingleRuntime();
             default:
                 throw new RuntimeException("Unsupported executor framework: " + frameworkType);
         }
